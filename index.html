@@ -1489,7 +1489,7 @@ function renderSon() {
     { k: 'vol', l: 'Volume', t: 'range', min: 0, max: 1, step: .05 }];
   b.append(fieldRow(M, F[0], () => { refresh(); renderSon(); }, rows));
   const mf = mk('div', 'row'); mf.append(mk('label', '', 'Ton fichier audio (mp3, m4a, wav)')); const fi = mk('input'); fi.type = 'file'; fi.accept = 'audio/*'; const st = mk('div', 'hint', SND.buf ? '✓ ' + SND.bufName : 'Aucun fichier');
-  fi.onchange = async () => { const f = fi.files[0]; if (!f) return; try { const AC = window.AudioContext || window.webkitAudioContext, ac = new AC(); SND.buf = await ac.decodeAudioData(await f.arrayBuffer()); SND.bufName = f.name; try { ac.close(); } catch (err) {} const id = 'mus' + uid(); P.music.fileId = id; await rememberFile(id, f, 'audio'); SNDB.set(id, SND.buf); st.textContent = '✓ ' + f.name; refresh(); } catch (e) { st.textContent = 'Fichier audio illisible'; } };
+  fi.onchange = async () => { const f = fi.files[0]; if (!f) return; try { const AC = window.AudioContext || window.webkitAudioContext, ac = new AC(); SND.buf = await ac.decodeAudioData(await f.arrayBuffer()); SND.bufName = f.name; try { ac.close(); } catch (err) {} const id = 'mus' + uid(); P.music.fileId = id; P.music.mode = 'perso'; await rememberFile(id, f, 'audio'); SNDB.set(id, SND.buf); st.textContent = '✓ ' + f.name; refresh(); toast('Musique enregistrée. Elle reste après actualisation.'); } catch (e) { st.textContent = e && e.message === 'pas gardé' ? 'Musique trop lourde pour être gardée' : 'Fichier audio illisible'; } };
   mf.append(fi, st); mf.dataset.k = 'perso'; rows.push({ row: mf, show: o => o.mode === 'perso', obj: M }); b.append(mf);
   b.append(fieldRow(M, F[2], () => refresh(), rows)); b.append(fieldRow(M, F[3], (k, live) => { if (SND.out) SND.out.gain.value = SND.muted ? 0 : M.vol; if (!live) autosave(); }, rows));
   box.append(b);
@@ -2352,7 +2352,10 @@ function stashData(id, name, mime, kind, data) {
 }
 function lsDrop(id) {
   try {
+    const meta = lsIndex().find(f => f.id === id);
     localStorage.removeItem('p2f_f_' + id);
+    const n = meta && meta.parts || 0;
+    for (let i = 0; i < n + 2; i++) localStorage.removeItem('p2f_f_' + id + '_' + i);
     localStorage.setItem(FILE_INDEX, JSON.stringify(lsIndex().filter(f => f.id !== id)));
   } catch (e) {}
 }
@@ -2374,23 +2377,135 @@ async function cacheGetFile(id) {
 async function cacheDrop(id) {
   try { if (window.caches) { const cache = await caches.open('studio-files-v1'); await cache.delete(cacheURL(id)); } } catch (e) {}
 }
+function sid(id) { return String(id || '').replace(/[^a-zA-Z0-9_-]/g, '') || 'f'; }
+async function opfsDir() {
+  if (!navigator.storage || !navigator.storage.getDirectory) return null;
+  const root = await navigator.storage.getDirectory();
+  return root.getDirectoryHandle('studio-files', { create: true });
+}
+async function opfsWrite(dir, name, blob) {
+  const fh = await dir.getFileHandle(name, { create: true });
+  if (typeof fh.createWritable === 'function') {
+    const w = await fh.createWritable();
+    await w.write(blob);
+    await w.close();
+    return;
+  }
+  const buf = await blob.arrayBuffer();
+  await new Promise((resolve, reject) => {
+    const src = "self.onmessage=async e=>{try{const root=await navigator.storage.getDirectory();const dir=await root.getDirectoryHandle('studio-files',{create:true});const fh=await dir.getFileHandle(e.data.name,{create:true});const a=await fh.createSyncAccessHandle();a.truncate(0);try{a.write(e.data.buf,{at:0});}catch(err){a.write(e.data.buf,0);}a.flush();a.close();self.postMessage({ok:1});}catch(err){self.postMessage({ok:0,err:String(err)});}};";
+    const worker = new Worker(URL.createObjectURL(new Blob([src], { type: 'application/javascript' })));
+    worker.onmessage = e => { worker.terminate(); e.data.ok ? resolve() : reject(new Error(e.data.err || 'écriture')); };
+    worker.onerror = err => { worker.terminate(); reject(err.error || err); };
+    worker.postMessage({ name, buf }, [buf]);
+  });
+}
+async function opfsSave(id, blob, meta) {
+  const dir = await opfsDir();
+  if (!dir) throw new Error('dossier indisponible');
+  const name = sid(id);
+  await opfsWrite(dir, name + '.bin', blob);
+  await opfsWrite(dir, name + '.json', new Blob([JSON.stringify(meta || { id })], { type: 'application/json' }));
+  const check = await (await dir.getFileHandle(name + '.bin')).getFile();
+  if (!check || !check.size) throw new Error('fichier vide');
+  return check;
+}
+async function opfsGet(id) {
+  const dir = await opfsDir();
+  if (!dir) return null;
+  try { return await (await dir.getFileHandle(sid(id) + '.bin')).getFile(); } catch (e) { return null; }
+}
+async function opfsDrop(id) {
+  const dir = await opfsDir();
+  if (!dir || !dir.removeEntry) return;
+  try { await dir.removeEntry(sid(id) + '.bin'); } catch (e) {}
+  try { await dir.removeEntry(sid(id) + '.json'); } catch (e) {}
+}
+async function opfsList() {
+  const dir = await opfsDir();
+  if (!dir) return [];
+  const out = [];
+  const names = [];
+  try {
+    if (dir.entries) { for await (const [name, handle] of dir.entries()) names.push([name, handle]); }
+    else if (dir.values) { for await (const handle of dir.values()) names.push([handle.name, handle]); }
+  } catch (e) { return []; }
+  for (const [name, handle] of names) {
+    if (!name.endsWith('.json')) continue;
+    try {
+      const meta = JSON.parse(await (await handle.getFile()).text());
+      if (!meta || !meta.id || String(meta.id).indexOf('vid_') === 0) continue;
+      const blob = await opfsGet(meta.id);
+      if (blob && blob.size) out.push(Object.assign({}, meta, { blob, mime: meta.mime || blob.type }));
+    } catch (e) {}
+  }
+  return out;
+}
+function bufToB64(buf) {
+  const bytes = new Uint8Array(buf);
+  let bin = '';
+  for (let i = 0; i < bytes.length; i += 32768) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 32768));
+  return btoa(bin);
+}
+function b64ToBuf(b64) {
+  const bin = atob(b64);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out.buffer;
+}
+function stashBuf(id, name, mime, kind, buf, extra) {
+  try {
+    const b64 = bufToB64(buf);
+    const size = 350000;
+    const parts = [];
+    for (let i = 0; i < b64.length; i += size) parts.push(b64.slice(i, i + size));
+    lsDrop(id);
+    parts.forEach((p, i) => localStorage.setItem('p2f_f_' + id + '_' + i, p));
+    const list = lsIndex().filter(f => f.id !== id);
+    list.push(Object.assign({ id, name: name || id, mime: mime || '', kind: kind || 'file', created: Date.now(), parts: parts.length }, extra || {}));
+    localStorage.setItem(FILE_INDEX, JSON.stringify(list));
+    return true;
+  } catch (e) {
+    try { lsDrop(id); } catch (err) {}
+    return false;
+  }
+}
+function partsData(meta) {
+  if (!meta || !meta.parts) return '';
+  let b64 = '';
+  for (let i = 0; i < meta.parts; i++) {
+    const p = localStorage.getItem('p2f_f_' + meta.id + '_' + i);
+    if (!p) return '';
+    b64 += p;
+  }
+  return 'data:' + (meta.mime || 'application/octet-stream') + ';base64,' + b64;
+}
 async function loadStoredFiles() {
   const byId = new Map();
+  try { (await opfsList()).forEach(r => byId.set(r.id, r)); } catch (e) {}
   lsIndex().forEach(meta => {
-    let data = '';
-    try { data = localStorage.getItem('p2f_f_' + meta.id) || ''; } catch (e) {}
-    if (data) byId.set(meta.id, Object.assign({}, meta, { data }));
+    if (byId.has(meta.id) && asBlob(byId.get(meta.id))) return;
+    try {
+      if (meta.parts) {
+        const data = partsData(meta);
+        if (data) byId.set(meta.id, Object.assign({}, meta, { data }));
+      } else {
+        const data = localStorage.getItem('p2f_f_' + meta.id) || '';
+        if (data) byId.set(meta.id, Object.assign({}, meta, { data }));
+      }
+    } catch (e) {}
   });
   try {
     const rows = await idbAll('files');
     rows.forEach(r => {
       const prev = byId.get(r.id) || {};
-      byId.set(r.id, Object.assign({}, r, prev, { data: prev.data || r.data || '', buf: r.buf || prev.buf }));
+      byId.set(r.id, Object.assign({}, r, prev, { data: prev.data || r.data || '', buf: (prev.buf && prev.buf.byteLength) ? prev.buf : r.buf, blob: (prev.blob && prev.blob.size) ? prev.blob : r.blob }));
     });
   } catch (e) {}
   for (const rec of byId.values()) {
     if (rec.data || (rec.buf && rec.buf.byteLength) || (rec.blob && rec.blob.size)) continue;
-    try { const blob = await cacheGetFile(rec.id); if (blob) rec.blob = blob; } catch (e) {}
+    try { const blob = await cacheGetFile(rec.id); if (blob && blob.size) rec.blob = blob; } catch (e) {}
+    if (!(rec.blob && rec.blob.size)) { try { const blob = await opfsGet(rec.id); if (blob && blob.size) rec.blob = blob; } catch (e) {} }
   }
   return [...byId.values()];
 }
@@ -2398,6 +2513,7 @@ async function forgetFile(id) {
   lsDrop(id);
   try { await idbDel('files', id); } catch (e) {}
   await cacheDrop(id);
+  try { await opfsDrop(id); } catch (e) {}
   if (URLS.has(id)) { URL.revokeObjectURL(URLS.get(id)); URLS.delete(id); }
   FILES = FILES.filter(f => f.id !== id);
 }
@@ -2441,9 +2557,10 @@ async function ensureMounted(rec) {
   if (!rec) return;
   if (rec.kind === 'audio') { if (SNDB.has(rec.id)) return; }
   else if (MEDIA.has(rec.id) && MEDIA.get(rec.id).el) return;
-  const blob = asBlob(rec);
-  if (blob) { await mountAsset(rec.id, blob, rec.name, rec.mime || rec.type || ''); return; }
-  if (rec.data) await mountFromData(rec.id, rec.data, rec.name);
+  let blob = asBlob(rec);
+  if (!blob && rec.data) { try { blob = await (await fetch(rec.data)).blob(); } catch (e) {} }
+  if (!blob) return;
+  await mountAsset(rec.id, blob, rec.name, rec.mime || rec.type || blob.type || '');
 }
 async function restoreAssetsForProject() {
   let all = [];
@@ -2464,6 +2581,20 @@ async function restoreAssetsForProject() {
     SND.buf = SNDB.get(P.music.fileId);
     SND.bufName = (map.get(P.music.fileId) || {}).name || 'musique';
   }
+}
+async function videoPoster(file) {
+  try {
+    const url = URL.createObjectURL(file);
+    const v = document.createElement('video');
+    v.muted = true; v.playsInline = true; v.preload = 'auto'; v.src = url;
+    await new Promise((res, rej) => { v.onloadeddata = res; v.onerror = rej; });
+    try { v.currentTime = Math.min(.25, (v.duration || 1) / 3); } catch (e) {}
+    await new Promise(res => { v.onseeked = res; setTimeout(res, 350); });
+    const c = cv(180, 320), x = c.getContext('2d');
+    x.fillStyle = '#000'; x.fillRect(0, 0, 180, 320); x.drawImage(v, 0, 0, 180, 320);
+    URL.revokeObjectURL(url);
+    return c.toDataURL('image/jpeg', .7);
+  } catch (e) { return ''; }
 }
 async function rememberFile(id, file, kind) {
   const imageKind = kind === 'image' || kind === 'logo';
@@ -2487,24 +2618,26 @@ async function rememberFile(id, file, kind) {
     const blob = await (await fetch(data)).blob();
     mime = blob.type || mime;
     buf = await blob.arrayBuffer();
-  } else {
-    buf = await file.arrayBuffer();
-    if (buf.byteLength < 1200000) {
-      const bytes = new Uint8Array(buf);
-      let bin = '';
-      for (let i = 0; i < bytes.length; i += 8192) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + 8192));
-      data = 'data:' + (mime || 'application/octet-stream') + ';base64,' + btoa(bin);
-    }
+  } else buf = await file.arrayBuffer();
+  if (!mime) mime = kind === 'audio' ? 'audio/mpeg' : kind === 'video' ? 'video/mp4' : 'application/octet-stream';
+  let poster = '';
+  if (kind === 'video') poster = await videoPoster(file);
+  const rec = { id, name: file.name || id, mime, kind: kind || 'file', created: Date.now(), data, buf, poster };
+  let kept = false;
+  const blob = buf ? new Blob([buf], { type: mime || 'application/octet-stream' }) : null;
+  if (blob) {
+    try { await opfsSave(id, blob, { id, name: rec.name, mime, kind: rec.kind, created: rec.created, poster }); rec.blob = blob; kept = true; } catch (e) {}
   }
-  const rec = { id, name: file.name || id, mime, kind: kind || 'file', created: Date.now(), data, buf };
-  const kept = data ? stashData(id, rec.name, mime, rec.kind, data) : false;
-  try { if (buf) await cachePutFile(id, new Blob([buf], { type: mime || 'application/octet-stream' })); } catch (e) {}
-  try { await idbPut('files', { id, name: rec.name, mime, kind: rec.kind, buf, created: rec.created }); }
-  catch (e) { if (!kept) throw e; }
-  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+  if (data && stashData(id, rec.name, mime, rec.kind, data)) kept = true;
+  if (buf && (kind === 'audio' || kind === 'video') && stashBuf(id, rec.name, mime, rec.kind, buf, poster ? { poster } : null)) kept = true;
+  if (!kept) {
+    try { await idbPut('files', { id, name: rec.name, mime, kind: rec.kind, buf, created: rec.created }); kept = true; } catch (e) {}
+  }
+  try { if (buf) await cachePutFile(id, blob); } catch (e) {}
   const i = FILES.findIndex(f => f.id === id);
   if (i >= 0) FILES[i] = rec; else FILES.push(rec);
-  if (!kept && !(buf && buf.byteLength)) throw new Error('stockage');
+  if (!kept) throw new Error('pas gardé');
+  rec.durable = true;
   return data;
 }
 
@@ -3079,17 +3212,18 @@ function renderFiles() {
   const box = $('tab-files'); if (!box) return; box.innerHTML = '';
   const b = mk('div', 'box');
   b.append(mk('h3', '', 'Fichiers enregistrés'));
-  b.append(mk('div', 'hint', 'Enregistrement direct : la photo reste après avoir actualisé la page, sur cet appareil.'));
+  b.append(mk('div', 'hint', 'Photos, musiques et vidéos restent après actualisation, sur cet appareil.'));
   const fi = mk('input'); fi.type = 'file'; fi.accept = 'image/*,video/*,audio/*'; fi.multiple = true;
   fi.onchange = async () => {
     const list = [...fi.files];
     for (const f of list) {
       try {
         const id = 'm' + uid();
-        const kind = (f.type || '').startsWith('video') ? 'video' : (f.type || '').startsWith('audio') ? 'audio' : 'image';
+        const t = f.type || '', n = f.name || '';
+        const kind = (t.startsWith('video') || /\.(mp4|mov|webm|m4v)$/i.test(n)) ? 'video' : (t.startsWith('audio') || /\.(mp3|m4a|wav|aac|ogg)$/i.test(n)) ? 'audio' : 'image';
         await mountAsset(id, f, f.name, f.type);
         await rememberFile(id, f, kind);
-      } catch (err) { toast('Impossible de lire ' + f.name); }
+      } catch (err) { toast('Pas gardé : ' + f.name); }
     }
     toast(list.length > 1 ? 'Fichiers enregistrés.' : 'Fichier enregistré.');
     renderFiles();
@@ -3102,7 +3236,8 @@ function renderFiles() {
     if (f.kind === 'image' || f.kind === 'video' || f.kind === 'logo') {
       const im = mk('img'); im.alt = ''; im.src = f.kind === 'video' ? '' : blobURL(f);
       if (f.kind === 'video') {
-        const ph = mk('div', 'ph', 'Vidéo'); card.append(ph);
+        if (f.poster) { const im = mk('img'); im.alt = ''; im.src = f.poster; card.append(im); }
+        else { const ph = mk('div', 'ph', 'Vidéo'); card.append(ph); }
       } else card.append(im);
     } else card.append(mk('div', 'ph', 'Audio'));
     const meta = mk('div', 'meta');
@@ -3160,6 +3295,37 @@ function handFile(blob, filename) {
   }
   go();
 }
+function vidIndex() { try { const a = JSON.parse(localStorage.getItem('p2f_videos_v1') || '[]'); return Array.isArray(a) ? a : []; } catch (e) { return []; } }
+function writeVidIndex(list) {
+  const slim = list.map(v => ({ id: v.id, name: v.name, mime: v.mime || '', created: v.created || Date.now(), thumb: v.thumb || '', size: v.size || 0, status: v.status || 'exported', project: v.project || null }));
+  try { localStorage.setItem('p2f_videos_v1', JSON.stringify(slim)); }
+  catch (e) { try { localStorage.setItem('p2f_videos_v1', JSON.stringify(slim.map(v => ({ id: v.id, name: v.name, mime: v.mime, created: v.created, size: v.size, status: v.status, thumb: '', project: null })))); } catch (e2) {} }
+}
+async function keepVideo(rec) {
+  const meta = { id: rec.id, name: rec.name || 'Vidéo', mime: rec.mime || '', created: rec.created || Date.now(), thumb: rec.thumb || '', size: rec.size || (rec.blob && rec.blob.size) || 0, status: rec.status || 'exported', project: rec.project || null };
+  if (rec.blob && rec.blob.size) { try { await opfsSave('vid_' + rec.id, rec.blob, { id: 'vid_' + rec.id, name: meta.name, mime: meta.mime, kind: 'video', created: meta.created }); } catch (e) {} }
+  writeVidIndex(vidIndex().filter(v => v.id !== rec.id).concat([meta]));
+  const row = Object.assign({}, meta, { blob: rec.blob || null });
+  const i = VIDEOS.findIndex(v => v.id === rec.id);
+  if (i >= 0) VIDEOS[i] = row; else VIDEOS.push(row);
+}
+async function loadVideos() {
+  const byId = new Map();
+  try { (await idbAll('videos')).forEach(r => { if (r && r.id) byId.set(r.id, r); }); } catch (e) {}
+  for (const m of vidIndex()) {
+    const prev = byId.get(m.id) || {};
+    let blob = prev.blob && prev.blob.size ? prev.blob : null;
+    if (!blob) { try { blob = await opfsGet('vid_' + m.id); } catch (e) {} }
+    byId.set(m.id, Object.assign({}, prev, m, { blob: blob || null, thumb: (m.thumb || prev.thumb || '') }));
+  }
+  return [...byId.values()];
+}
+async function forgetVideo(id) {
+  try { await opfsDrop('vid_' + id); } catch (e) {}
+  try { await idbDel('videos', id); } catch (e) {}
+  writeVidIndex(vidIndex().filter(v => v.id !== id));
+  VIDEOS = VIDEOS.filter(v => v.id !== id);
+}
 function renderVideos() {
   const box = $('tab-videos'); if (!box) return; box.innerHTML = '';
   const b = mk('div', 'box');
@@ -3181,8 +3347,10 @@ function renderVideos() {
       URL.revokeObjectURL(url);
     } catch (e) {}
     try {
-      await idbPut('videos', { id, name: f.name || 'Vidéo importée', mime: f.type || 'video/mp4', blob: f, created: Date.now(), thumb, size: f.size, status: 'imported', project: null });
-      VIDEOS = await idbAll('videos'); renderVideos(); toast('Vidéo ajoutée à la bibliothèque.');
+      const rec = { id, name: f.name || 'Vidéo importée', mime: f.type || 'video/mp4', blob: f, created: Date.now(), thumb, size: f.size, status: 'imported', project: null };
+      try { await idbPut('videos', rec); } catch (e) {}
+      await keepVideo(rec);
+      VIDEOS = await loadVideos(); renderVideos(); toast('Vidéo ajoutée. Elle reste après actualisation.');
     } catch (e) { toast('Pas assez d’espace pour stocker cette vidéo.'); }
   };
   b.append(im);
@@ -3208,7 +3376,7 @@ function renderVideos() {
     const del = mk('button', 'btn red', 'Supprimer'); del.type = 'button';
     del.onclick = async () => {
       if (!confirm('Supprimer cette vidéo de la bibliothèque ?')) return;
-      try { await idbDel('videos', v.id); VIDEOS = await idbAll('videos'); renderVideos(); } catch (e) { toast('Suppression impossible.'); }
+      try { await forgetVideo(v.id); renderVideos(); } catch (e) { toast('Suppression impossible.'); }
     };
     acts.append(edit, dl, del); meta.append(acts); card.append(meta); grid.append(card);
   });
@@ -3245,8 +3413,9 @@ async function storeExport(blob, type) {
     mime: type, blob, size: blob.size, status: 'exported', thumb: REC_THUMB || '', project
   });
   try {
-    await idbPut('videos', rec);
-    VIDEOS = await idbAll('videos');
+    try { await idbPut('videos', rec); } catch (e) {}
+    await keepVideo(rec);
+    VIDEOS = await loadVideos();
     toast('Vidéo rangée dans Mes vidéos.');
     if ($('tab-videos') && $('tab-videos').classList.contains('on')) renderVideos();
   } catch (e) { toast('Vidéo prête à télécharger, mais le stockage local est plein.'); }
@@ -3351,7 +3520,7 @@ async function init() {
     } catch (e) { console.warn('police intégrée indisponible', e); }
   }
   try { FILES = await loadStoredFiles(); } catch (e) { FILES = []; }
-  try { VIDEOS = await idbAll('videos'); } catch (e) { VIDEOS = []; }
+  try { VIDEOS = await loadVideos(); } catch (e) { VIDEOS = []; }
   try { await mountFlyerAssets(); } catch (e) {}
   let src = null;
   try { const rec = (FILES || []).find(f => f.id === 'logo'); const b = asBlob(rec); if (b) src = URL.createObjectURL(b); } catch (e) {}
