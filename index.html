@@ -405,7 +405,7 @@ body.flyer-on #bPlay { min-width: 88px; }
     </div>
     <div class="brand">
       <h1>STUDIO <span>VIDÉO PRO</span></h1>
-      <small>Pubs, reels et flyers · Plug 2 France</small>
+      <small>Vidéos promo, flyers, commerces et certifications</small>
     </div>
   </header>
   <div class="notice" id="frameNotice" hidden>Cette page est affichée dans un cadre (aperçu intégré). Les téléchargements y sont souvent bloqués : ouvre-la dans ton navigateur (Chrome ou Safari), ou depuis ton lien GitHub Pages, pour pouvoir enregistrer les vidéos.</div>
@@ -712,9 +712,84 @@ function tplVide() {
     newEl('banner', { text: 'TON TEXTE ICI', style: 'gold', size: 118, y: 1400, t0: 1.6 })] })],
     music: Object.assign({}, NOMUSIC, { beatFrom: 0, dropFrom: 100, beatTo: 5 }), media: {} };
 }
+function sh3(id, x, y, size, t0, o) {
+  const def = SHAPES[id] || {};
+  return newEl('shape', Object.assign({ shapeId: id, x, y, size, t0, anim: 'pop', color: def.c1 || '#f5b800', color2: def.c2 || '#fff6d0' }, o));
+}
+function tplPresentation() {
+  const E = newEl, B = (t, st, sz, y, t0, o = {}) => E('banner', Object.assign({ text: t, style: st, size: sz, y, t0 }, o));
+  return {
+    name: 'Présentation commerce',
+    scenes: [
+      newScene({ name: 'Enseigne', dur: 3.5, trans: 'cut', impact: true, elements: [
+        sh3('sign', 540, 620, 620, .2),
+        sh3('shop', 540, 1080, 420, .55),
+        B('BIENVENUE', 'gold', 120, 1460, 1.3, { angle: -2 }),
+        B('CHEZ NOUS', 'black', 110, 1620, 1.65, { angle: 2 })] }),
+      newScene({ name: 'Le commerce', dur: 5, trans: 'fade', elements: [
+        E('image', { src: 'upload', shape: 'card', aspect: '45', w: 760, x: 540, y: 980, t0: .1, anim: 'zoom', zoom0: 1.2, label: 'PHOTO DU COMMERCE' }),
+        B('NOM DU COMMERCE', 'blue', 108, 280, .35, { angle: -1.5 }),
+        B('VILLE · ADRESSE', 'white', 72, 1580, 1.1),
+        sh3('pin', 180, 1580, 180, 1.3)] }),
+      newScene({ name: 'Offre', dur: 4, trans: 'zoom', elements: [
+        sh3('percent', 540, 640, 520, .2),
+        B('OFFRE DU MOMENT', 'gold', 100, 1100, .6, { angle: -2 }),
+        B('PASSE NOUS VOIR', 'black', 96, 1280, 1.1, { angle: 1.5 }),
+        sh3('arrow', 540, 1560, 280, 1.5)] })
+    ],
+    music: Object.assign({}, NOMUSIC), media: {}
+  };
+}
+function tplCertification() {
+  const E = newEl, B = (t, st, sz, y, t0, o = {}) => E('banner', Object.assign({ text: t, style: st, size: sz, y, t0 }, o));
+  return {
+    name: 'Certification commerce',
+    scenes: [
+      newScene({ name: 'Sceau', dur: 3.2, trans: 'cut', impact: true, elements: [
+        sh3('seal', 540, 760, 640, .15),
+        B('COMMERCE', 'gold', 120, 1280, 1.1, { angle: -2 }),
+        B('CERTIFIÉ', 'black', 120, 1460, 1.45, { angle: 2 })] }),
+      newScene({ name: 'La preuve', dur: 5, trans: 'fade', elements: [
+        sh3('plaque', 540, 420, 560, .15),
+        E('image', { src: 'upload', shape: 'card', aspect: 'square', w: 640, x: 540, y: 1080, t0: .3, anim: 'zoom', label: 'PHOTO DU COMMERCE' }),
+        sh3('verified', 860, 820, 220, 1.2),
+        B('NOM · VILLE', 'white', 72, 1560, 1.4)] }),
+      newScene({ name: 'Final', dur: 3.5, trans: 'flash', elements: [
+        E('image', { src: 'logo', shape: 'free', w: 560, x: 540, y: 520, t0: 0, anim: 'zoom', halo: true }),
+        sh3('shield', 540, 1100, 380, .4),
+        B('CERTIFIÉ PLUG 2 FRANCE', 'gold', 78, 1480, 1)] })
+    ],
+    music: Object.assign({}, NOMUSIC), media: {}
+  };
+}
+function tplFlyerVideo() {
+  const B = (t, st, sz, y, t0, o = {}) => newEl('banner', Object.assign({ text: t, style: st, size: sz, y, t0 }, o));
+  return {
+    name: 'Flyer animé',
+    scenes: [
+      newScene({ name: 'Pop', dur: 3, trans: 'cut', impact: true, elements: [
+        sh3('spark', 540, 700, 700, .05),
+        sh3('crown', 540, 280, 280, .2),
+        B('OFFRE', 'gold', 140, 1180, .7, { angle: -2 }),
+        B('EXCLUSIVE', 'black', 120, 1360, 1, { angle: 2 })] }),
+      newScene({ name: 'Visuel', dur: 4, trans: 'zoom', elements: [
+        newEl('image', { src: 'upload', shape: 'card', aspect: '45', w: 780, x: 540, y: 900, t0: 0, anim: 'pop', label: 'TA PHOTO' }),
+        sh3('tag', 820, 520, 260, .6),
+        B('-30%', 'red', 120, 1500, .8)] }),
+      newScene({ name: 'Appel', dur: 3, trans: 'fade', elements: [
+        sh3('rosette', 540, 560, 420, .15),
+        B('J’EN PROFITE', 'gold', 100, 1100, .5),
+        B('CETTE SEMAINE', 'white', 72, 1280, .9)] })
+    ],
+    music: Object.assign({}, NOMUSIC), media: {}
+  };
+}
 const TEMPLATES = [
-  ['annonce', 'Annonce de l’application', 'La vidéo d’origine : accroche, logo 3D, démo sur téléphones, appel final.', tplAnnonce],
-  ['commerce', 'Commerce certifié', 'Sans téléphone : photo du commerce, nom, ville, badge « certifié » et adresse.', tplCommerce],
+  ['presentation', 'Présentation commerce', 'Enseigne, photo du lieu, adresse et offre. Pour présenter une boutique.', tplPresentation],
+  ['certif', 'Certification commerce', 'Sceau, plaque et badge vérifié. Pour annoncer un commerce certifié.', tplCertification],
+  ['flyer', 'Flyer animé', 'Une affiche qui surgit : titre, photo, prix, appel.', tplFlyerVideo],
+  ['annonce', 'Annonce de l’application', 'Accroche, logo, démo et appel final.', tplAnnonce],
+  ['commerce', 'Commerce certifié', 'Photo du commerce, nom, ville, badge et adresse.', tplCommerce],
   ['vide', 'Projet vide', 'Une scène avec le logo : tu construis le reste.', tplVide]
 ];
 
@@ -1302,7 +1377,7 @@ function selectScene(i) { curScene = i; curEl = null; S.move = false; renderScen
 
 /* ----- onglet Éléments ----- */
 const ICON = { banner: '▬', text: 'T', image: '▣', phone: '▯', badge: '✪' };
-const NAME = { banner: 'Bandeau', text: 'Texte', image: 'Image', phone: 'Téléphone', badge: 'Badge', shape: 'Graphisme' };
+const NAME = { banner: 'Bandeau', text: 'Texte', image: 'Image', phone: 'Téléphone', badge: 'Badge', shape: 'Objet 3D' };
 function elSummary(e) {
   let d = e.type === 'phone' ? (e.name || 'écran') : e.type === 'shape' ? ((SHAPES[e.shapeId] && SHAPES[e.shapeId].name) || 'forme') : e.type === 'image' ? (e.src === 'logo' ? 'logo' : (e.mid && MEDIA.get(e.mid) ? MEDIA.get(e.mid).name : 'à ajouter')) : String(e.text || '').replace(/\n/g, ' ');
   return d.length > 26 ? d.slice(0, 25) + '…' : d;
@@ -2457,6 +2532,145 @@ regShape('lock', 'Certifications', 'Cadenas', (ctx, c1, c2) => {
   ctx.fillRect(-4, 28, 8, 22);
 });
 
+function hexRgb(hex) {
+  const h = String(hex || '#f5b800').replace('#', '');
+  const n = h.length >= 6 ? h.slice(0, 6) : 'f5b800';
+  return [parseInt(n.slice(0, 2), 16), parseInt(n.slice(2, 4), 16), parseInt(n.slice(4, 6), 16)];
+}
+function lit(hex, k) {
+  const [r, g, b] = hexRgb(hex);
+  const t = Math.max(-1, Math.min(1, k));
+  const m = (c, L) => Math.round(c + (L - c) * Math.abs(t));
+  const L = t >= 0 ? 255 : 0;
+  return 'rgb(' + m(r, L) + ',' + m(g, L) + ',' + m(b, L) + ')';
+}
+function paintMesh(ctx, faces, yaw, pitch) {
+  const cy = Math.cos(yaw), sy = Math.sin(yaw), cp = Math.cos(pitch), sp = Math.sin(pitch);
+  const lx = .32, ly = -.78, lz = .5, ln = Math.hypot(lx, ly, lz);
+  const proj = p => {
+    const x1 = p[0] * cy - p[2] * sy, z1 = p[0] * sy + p[2] * cy;
+    const y2 = p[1] * cp - z1 * sp, z2 = p[1] * sp + z1 * cp;
+    const f = 460 / (460 + z2);
+    return [x1 * f, y2 * f, z2];
+  };
+  ctx.save();
+  ctx.shadowColor = 'transparent';
+  ctx.fillStyle = 'rgba(0,0,0,.32)';
+  ctx.beginPath(); ctx.ellipse(4, 92, 74, 14, 0, 0, 6.2832); ctx.fill();
+  const drawn = [];
+  faces.forEach(face => {
+    const pts = face.pts;
+    if (!pts || pts.length < 3) return;
+    const a = pts[0], b = pts[1], c = pts[2];
+    let nx = (b[1] - a[1]) * (c[2] - a[2]) - (b[2] - a[2]) * (c[1] - a[1]);
+    let ny = (b[2] - a[2]) * (c[0] - a[0]) - (b[0] - a[0]) * (c[2] - a[2]);
+    let nz = (b[0] - a[0]) * (c[1] - a[1]) - (b[1] - a[1]) * (c[0] - a[0]);
+    const nl = Math.hypot(nx, ny, nz) || 1;
+    nx /= nl; ny /= nl; nz /= nl;
+    const nx1 = nx * cy - nz * sy, nz1 = nx * sy + nz * cy;
+    const ny2 = ny * cp - nz1 * sp, nz2 = ny * sp + nz1 * cp;
+    if (nz2 < -0.02) return;
+    const lambert = Math.max(.12, (nx1 * lx + ny2 * ly + nz2 * lz) / ln);
+    const pp = pts.map(proj);
+    drawn.push({ pp, z: pp.reduce((s, p) => s + p[2], 0) / pp.length, lambert, col: face.col });
+  });
+  drawn.sort((p, q) => p.z - q.z);
+  drawn.forEach(f => {
+    ctx.beginPath();
+    f.pp.forEach((p, i) => i ? ctx.lineTo(p[0], p[1]) : ctx.moveTo(p[0], p[1]));
+    ctx.closePath();
+    ctx.fillStyle = lit(f.col, (f.lambert - .5) * 1.15);
+    ctx.fill();
+  });
+  ctx.restore();
+}
+function pushBox(faces, x, y, z, w, h, d, col) {
+  const x0 = x - w / 2, x1 = x + w / 2, y0 = y - h / 2, y1 = y + h / 2, z0 = z - d / 2, z1 = z + d / 2;
+  faces.push({ pts: [[x0, y0, z1], [x1, y0, z1], [x1, y1, z1], [x0, y1, z1]], col });
+  faces.push({ pts: [[x1, y0, z0], [x0, y0, z0], [x0, y1, z0], [x1, y1, z0]], col });
+  faces.push({ pts: [[x0, y0, z0], [x0, y0, z1], [x0, y1, z1], [x0, y1, z0]], col });
+  faces.push({ pts: [[x1, y0, z1], [x1, y0, z0], [x1, y1, z0], [x1, y1, z1]], col });
+  faces.push({ pts: [[x0, y0, z0], [x1, y0, z0], [x1, y0, z1], [x0, y0, z1]], col });
+  faces.push({ pts: [[x0, y1, z1], [x1, y1, z1], [x1, y1, z0], [x0, y1, z0]], col });
+}
+function pushCyl(faces, x, y, z, r, h, col, n) {
+  n = n || 16;
+  const y0 = y - h / 2, y1 = y + h / 2, top = [], bot = [];
+  for (let i = 0; i < n; i++) {
+    const a = i / n * 6.2832;
+    top.push([x + Math.cos(a) * r, y0, z + Math.sin(a) * r]);
+    bot.push([x + Math.cos(a) * r, y1, z + Math.sin(a) * r]);
+  }
+  faces.push({ pts: top, col });
+  faces.push({ pts: bot.slice().reverse(), col });
+  for (let i = 0; i < n; i++) {
+    const j = (i + 1) % n;
+    faces.push({ pts: [top[i], top[j], bot[j], bot[i]], col });
+  }
+}
+function pushExtrude(faces, poly, depth, col) {
+  const d = depth / 2;
+  const front = poly.map(p => [p[0], p[1], d]), back = poly.map(p => [p[0], p[1], -d]);
+  faces.push({ pts: front, col });
+  faces.push({ pts: back.slice().reverse(), col });
+  for (let i = 0; i < poly.length; i++) {
+    const j = (i + 1) % poly.length;
+    faces.push({ pts: [front[i], front[j], back[j], back[i]], col });
+  }
+}
+function starPoly(n, r0, r1) {
+  const p = [];
+  for (let i = 0; i < n * 2; i++) {
+    const a = -Math.PI / 2 + i / (n * 2) * 6.2832, r = i % 2 ? r1 : r0;
+    p.push([Math.cos(a) * r, Math.sin(a) * r]);
+  }
+  return p;
+}
+function yawOf() { return .62 + Math.sin(((S && S.t) || 0) * 1.25) * .2; }
+function set3(id, cat, build) {
+  if (!SHAPES[id]) return;
+  SHAPES[id].cat = cat;
+  SHAPES[id].draw = (ctx, c1, c2) => {
+    const faces = [];
+    build(faces, c1 || SHAPES[id].c1 || '#f5b800', c2 || SHAPES[id].c2 || '#fff6d0');
+    paintMesh(ctx, faces, yawOf(), -.4);
+  };
+}
+regShape('podium', 'Présentation', 'Podium', () => {}, '#f5b800', '#fff4c4', 460);
+regShape('sign', 'Présentation', 'Enseigne', () => {}, '#2a6bff', '#dbe6ff', 520);
+regShape('plaque', 'Certification', 'Plaque', () => {}, '#e8c56a', '#fff6d0', 520);
+set3('diamond', 'Luxe', (f, c1) => {
+  const top = [0, -88, 0], bot = [0, 88, 0], mid = [[78, 0, 0], [0, 0, 58], [-78, 0, 0], [0, 0, -58]];
+  for (let i = 0; i < 4; i++) { const a = mid[i], b = mid[(i + 1) % 4]; f.push({ pts: [top, a, b], col: c1 }); f.push({ pts: [bot, b, a], col: c1 }); }
+});
+set3('crown', 'Luxe', (f, c1) => pushExtrude(f, [[-88, 48], [-88, 8], [-52, 36], [-26, -52], [0, 18], [26, -62], [52, 28], [88, -8], [88, 48]], 28, c1));
+set3('laurel', 'Luxe', (f, c1) => { for (let i = 0; i < 8; i++) { const a = .4 + i * .22; pushBox(f, Math.cos(a) * 58, Math.sin(a) * 50 - 10, 0, 26, 12, 8, c1); pushBox(f, -Math.cos(a) * 58, Math.sin(a) * 50 - 10, 0, 26, 12, 8, c1); } });
+set3('spark', 'Luxe', (f, c1) => pushExtrude(f, starPoly(8, 92, 28), 22, c1));
+set3('ring', 'Luxe', (f, c1, c2) => { for (let i = 0; i < 12; i++) { const a = i / 12 * 6.2832; pushBox(f, Math.cos(a) * 52, Math.sin(a) * 52 + 8, 0, 22, 16, 16, c1); } pushExtrude(f, [[0, -78], [16, -48], [0, -18], [-16, -48]], 16, c2); });
+set3('shop', 'Commerce', (f, c1, c2) => { pushBox(f, 0, 18, 0, 110, 96, 70, c1); pushBox(f, 0, -48, 18, 132, 26, 36, c2); pushBox(f, 0, 28, 38, 30, 52, 8, '#14110a'); });
+set3('bag', 'Commerce', (f, c1) => { pushExtrude(f, [[-58, -16], [-46, 82], [0, 96], [46, 82], [58, -16]], 36, c1); pushBox(f, 0, -36, 0, 8, 40, 8, c1); });
+set3('tag', 'Commerce', (f, c1) => { pushExtrude(f, [[-16, -78], [66, -78], [66, 36], [0, 88], [-66, 36], [-66, -16]], 18, c1); pushCyl(f, 24, -46, 12, 8, 10, '#14110a', 8); });
+set3('pin', 'Commerce', (f, c1) => { pushCyl(f, 0, -28, 0, 36, 28, c1, 14); pushExtrude(f, [[-18, -10], [0, 86], [18, -10]], 16, c1); });
+set3('percent', 'Commerce', (f, c1, c2) => { pushExtrude(f, [[-6, -62], [18, -62], [6, 62], [-18, 62]], 14, c1); pushCyl(f, -32, -36, 0, 18, 14, c2, 10); pushCyl(f, 32, 36, 0, 18, 14, c2, 10); });
+set3('seal', 'Certification', (f, c1, c2) => { pushCyl(f, 0, 0, 0, 78, 20, c1, 18); pushExtrude(f, starPoly(6, 46, 22), 10, c2); });
+set3('ribbon', 'Flyer', (f, c1) => { pushBox(f, 0, -10, 0, 150, 36, 12, c1); pushExtrude(f, [[-75, 8], [-55, 8], [-40, 70], [-70, 48]], 10, c1); pushExtrude(f, [[75, 8], [55, 8], [40, 70], [70, 48]], 10, c1); });
+set3('medal', 'Certification', (f, c1, c2) => { pushBox(f, 0, -62, 0, 36, 28, 6, c2); pushCyl(f, 0, 8, 0, 58, 16, c1, 16); pushCyl(f, 0, 6, 10, 24, 6, c2, 10); });
+set3('hex', 'Présentation', (f, c1) => pushExtrude(f, [[0, -80], [70, -40], [70, 40], [0, 80], [-70, 40], [-70, -40]], 24, c1));
+set3('verified', 'Certification', (f, c1, c2) => { pushCyl(f, 0, 0, 0, 72, 16, c1, 16); pushExtrude(f, [[-30, 6], [-8, 28], [34, -30], [20, -40], [-8, 6], [-22, -6]], 8, c2); });
+set3('circle', 'Flyer', (f, c1) => pushCyl(f, 0, 0, 0, 78, 22, c1, 18));
+set3('frame', 'Flyer', (f, c1, c2) => { pushBox(f, 0, -70, 0, 150, 16, 14, c1); pushBox(f, 0, 70, 0, 150, 16, 14, c1); pushBox(f, -70, 0, 0, 16, 156, 14, c1); pushBox(f, 70, 0, 0, 16, 156, 14, c1); pushBox(f, 0, 0, 0, 110, 110, 6, c2); });
+set3('triangle', 'Présentation', (f, c1) => pushExtrude(f, [[0, -80], [78, 64], [-78, 64]], 26, c1));
+set3('arrow', 'Flyer', (f, c1) => pushExtrude(f, [[-70, -18], [20, -18], [20, -48], [78, 0], [20, 48], [20, 18], [-70, 18]], 18, c1));
+set3('divider', 'Présentation', (f, c1) => { pushBox(f, 0, 0, 0, 160, 10, 10, c1); pushCyl(f, 0, 0, 8, 14, 10, c1, 10); });
+set3('shield', 'Certification', (f, c1) => pushExtrude(f, [[-70, -60], [70, -60], [70, 10], [0, 86], [-70, 10]], 22, c1));
+set3('rosette', 'Flyer', (f, c1, c2) => { pushExtrude(f, starPoly(8, 84, 48), 16, c1); pushCyl(f, 0, 0, 12, 26, 10, c2, 12); });
+set3('scroll', 'Certification', (f, c1, c2) => { pushCyl(f, -62, 0, 0, 18, 70, c1, 10); pushCyl(f, 62, 0, 0, 18, 70, c1, 10); pushBox(f, 0, 0, 0, 110, 78, 10, c2); });
+set3('stamp', 'Certification', (f, c1) => { pushCyl(f, 0, 0, 0, 70, 16, c1, 16); pushBox(f, 0, 0, 12, 70, 16, 4, '#14110a'); });
+set3('lock', 'Certification', (f, c1, c2) => { for (let i = 0; i < 7; i++) { const a = Math.PI + i / 6 * Math.PI; pushBox(f, Math.cos(a) * 32, -24 + Math.sin(a) * 32, 0, 14, 12, 12, c2); } pushBox(f, 0, 22, 0, 92, 78, 28, c1); });
+set3('podium', 'Présentation', (f, c1, c2) => { pushBox(f, -48, 24, 0, 52, 70, 52, c1); pushBox(f, 8, 8, 0, 52, 102, 52, c2); pushBox(f, 62, 36, 0, 48, 46, 48, c1); });
+set3('sign', 'Présentation', (f, c1, c2) => { pushBox(f, -48, 20, 0, 8, 120, 8, c1); pushBox(f, 48, 20, 0, 8, 120, 8, c1); pushBox(f, 0, -36, 6, 150, 52, 12, c2); });
+set3('plaque', 'Certification', (f, c1, c2) => { pushBox(f, 0, 0, 0, 150, 110, 14, c1); pushBox(f, 0, 0, 10, 120, 80, 6, c2); pushCyl(f, 0, 0, 16, 16, 6, '#14110a', 8); });
+
 function shapeThumb(id) {
   if (THUMBS[id]) return THUMBS[id];
   const c = cv(128, 128), x = c.getContext('2d');
@@ -2474,9 +2688,8 @@ function drawShapeEl(e, p) {
   const sca = p.s * ((e.size || 340) / 230);
   g.scale(sca, sca);
   g.globalAlpha = p.a;
-  g.shadowColor = 'rgba(0,0,0,.4)';
-  g.shadowBlur = 16;
-  g.shadowOffsetY = 8;
+  g.shadowColor = 'transparent';
+  g.shadowBlur = 0;
   def.draw(g, e.color || def.c1, e.color2 || def.c2);
   g.restore();
 }
@@ -2493,9 +2706,9 @@ function typeMark(type) {
 }
 function shapePicker(s) {
   const wrap = mk('div');
-  wrap.append(mk('h3', '', 'Éléments graphiques'));
-  wrap.append(mk('div', 'hint', 'Formes vectorielles, pas des emojis. Touche un élément pour le poser sur la scène.'));
-  const cats = ['Luxe', 'Commerce', 'Badges', 'Formes', 'Certifications'];
+  wrap.append(mk('h3', '', 'Éléments 3D'));
+  wrap.append(mk('div', 'hint', 'Objets en volume, avec lumière et relief. Pas des emojis. Touche pour poser sur la scène : ils tournent légèrement pendant la lecture.'));
+  const cats = ['Luxe', 'Commerce', 'Flyer', 'Présentation', 'Certification'];
   const chips = mk('div', 'chips');
   cats.forEach(cat => {
     const b = mk('button', 'chip' + (cat === shapeCat ? ' sel' : ''), cat);
