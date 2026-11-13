@@ -592,18 +592,27 @@ const mW = m => m.kind === 'video' ? m.el.videoWidth : m.el.naturalWidth;
 const mH = m => m.kind === 'video' ? m.el.videoHeight : m.el.naturalHeight;
 const mOK = m => m && (m.kind === 'video' ? m.el.readyState >= 2 && m.el.videoWidth : m.el.complete && m.el.naturalWidth);
 function loadImg(src) { return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = rej; i.src = src; }); }
-async function addMediaFile(file) {
-  const id = 'm' + uid();
-  await mountAsset(id, file, file.name, file.type);
-  const kind = (file.type || '').startsWith('video') ? 'video' : (file.type || '').startsWith('audio') ? 'audio' : 'image';
-  try { await rememberFile(id, file, kind); } catch (err) { toast('Fichier ajouté, mais pas assez d’espace pour le garder après rechargement.'); }
-  return id;
-}
-function mediaData(m) {            // image réduite pour la sauvegarde du projet
-  const iw = m.el.naturalWidth, ih = m.el.naturalHeight, s = Math.min(1, 1200 / Math.max(iw, ih)), c = cv(iw * s, ih * s);
+function mediaData(m) {
+  if (!m || !m.el || !m.el.naturalWidth) return m && m.data || '';
+  if (m.data) return m.data;
+  const iw = m.el.naturalWidth, ih = m.el.naturalHeight, s = Math.min(1, 1200 / Math.max(iw, ih)), c = cv(Math.max(1, iw * s), Math.max(1, ih * s));
   c.getContext('2d').drawImage(m.el, 0, 0, c.width, c.height);
   const keepAlpha = /png|webp|gif/.test(m.type || '') || m.id === 'logo';
-  return keepAlpha ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', .88);
+  m.data = keepAlpha ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', .82);
+  return m.data;
+}
+async function addMediaFile(file) {
+  const id = 'm' + uid();
+  const kind = (file.type || '').startsWith('video') ? 'video' : (file.type || '').startsWith('audio') ? 'audio' : 'image';
+  let data = '';
+  try { data = (await rememberFile(id, file, kind)) || ''; }
+  catch (err) { toast('Fichier ajouté, mais pas assez d’espace pour le garder après rechargement.'); }
+  const rec = (FILES || []).find(f => f.id === id);
+  await mountAsset(id, (rec && asBlob(rec)) || file, file.name, (rec && rec.mime) || file.type);
+  const m = MEDIA.get(id);
+  if (m && data) m.data = data;
+  if (rec) toast('Enregistré sur cet appareil. Tu n’auras pas à le remettre.');
+  return id;
 }
 
 /* =====================================================================
@@ -1425,7 +1434,7 @@ function renderElForm() {
     const rm = mk('button', 'btn', 'Retirer le fichier'); rm.type = 'button'; rm.onclick = () => { e[key] = null; st.textContent = 'Aucun fichier'; refresh(); renderElList(); };
     const pick = mk('select');
     const o0 = mk('option'); o0.value = ''; o0.textContent = 'Réutiliser un fichier enregistré…'; pick.append(o0);
-    FILES.filter(f => f && f.blob && f.id !== 'logo' && (f.kind === 'image' || f.kind === 'video' || f.kind === 'logo')).forEach(f => { const o = mk('option'); o.value = f.id; o.textContent = f.name || f.id; pick.append(o); });
+    FILES.filter(f => f && f.id !== 'logo' && (asBlob(f) || f.data) && (f.kind === 'image' || f.kind === 'video' || f.kind === 'logo')).forEach(f => { const o = mk('option'); o.value = f.id; o.textContent = f.name || f.id; pick.append(o); });
     pick.onchange = async () => { const rec = FILES.find(f => f.id === pick.value); if (!rec) return; try { await ensureMounted(rec); e[key] = rec.id; if (e.type === 'image') e.src = 'upload'; st.textContent = '✓ ' + (rec.name || 'fichier'); refresh(); renderElList(); } catch (err) { st.textContent = 'Fichier illisible'; } };
     row.append(fi, pick, st, rm);
     if (key === 'mid') rows.push({ row, show: e.type === 'image' ? (o => o.src === 'upload') : null, obj: e });
@@ -1603,18 +1612,45 @@ function loadFlyers() {
   FLYERS = [fly];
 }
 function saveFlyers() {
-  try { localStorage.setItem(FLY_KEY, JSON.stringify({ current: fly && fly.id, list: FLYERS })); } catch (e) {}
+  const pack = (withData) => ({
+    current: fly && fly.id,
+    list: (FLYERS || []).map(f => {
+      const c = clone(f);
+      if (!withData) { delete c.bgData; (c.items || []).forEach(it => { delete it.data; }); return c; }
+      if (c.bgId) { const m = MEDIA.get(c.bgId); const d = m && (m.data || mediaData(m)); if (d) c.bgData = d; }
+      (c.items || []).forEach(it => {
+        if (!it.fileId || it.fileId === 'logo') return;
+        const m = MEDIA.get(it.fileId); const d = m && (m.data || mediaData(m)); if (d) it.data = d;
+      });
+      return c;
+    })
+  });
+  try { localStorage.setItem(FLY_KEY, JSON.stringify(pack(true))); }
+  catch (e) { try { localStorage.setItem(FLY_KEY, JSON.stringify(pack(false))); } catch (e2) {} }
+}
+async function mountFromData(id, data, name) {
+  if (!id || !data || MEDIA.has(id)) return;
+  const img = await loadImg(data);
+  MEDIA.set(id, { id, kind: 'image', el: img, name: name || 'photo', type: 'image/jpeg', data });
+  try {
+    const blob = await (await fetch(data)).blob();
+    await idbPut('files', { id, name: name || 'photo', mime: blob.type || 'image/jpeg', kind: 'image', buf: await blob.arrayBuffer(), created: Date.now() });
+    FILES = await idbAll('files');
+  } catch (e) {}
 }
 async function mountFlyerAssets() {
-  const ids = new Set();
-  FLYERS.forEach(f => {
-    if (f.bgId) ids.add(f.bgId);
-    (f.items || []).forEach(it => { if (it.fileId) ids.add(it.fileId); });
-  });
-  for (const id of ids) {
-    const rec = (FILES || []).find(x => x.id === id);
-    if (!rec) continue;
-    try { await ensureMounted(rec); } catch (e) {}
+  for (const f of FLYERS || []) {
+    if (f.bgId && !MEDIA.has(f.bgId)) {
+      const rec = (FILES || []).find(x => x.id === f.bgId);
+      if (rec) { try { await ensureMounted(rec); } catch (e) {} }
+      if (!MEDIA.has(f.bgId) && f.bgData) { try { await mountFromData(f.bgId, f.bgData, 'fond'); } catch (e) {} }
+    }
+    for (const it of f.items || []) {
+      if (!it.fileId || it.fileId === 'logo' || MEDIA.has(it.fileId)) continue;
+      const rec = (FILES || []).find(x => x.id === it.fileId);
+      if (rec) { try { await ensureMounted(rec); } catch (e) {} }
+      if (!MEDIA.has(it.fileId) && it.data) { try { await mountFromData(it.fileId, it.data, 'photo'); } catch (e) {} }
+    }
   }
 }
 function pickImage(cb) {
@@ -1625,8 +1661,10 @@ function pickImage(cb) {
 }
 async function storeImageFile(file) {
   const id = 'm' + uid();
-  await rememberFile(id, file, 'image');
-  await mountAsset(id, file, file.name, file.type);
+  const data = await rememberFile(id, file, 'image');
+  const rec = (FILES || []).find(f => f.id === id);
+  await mountAsset(id, (rec && asBlob(rec)) || file, file.name, (rec && rec.mime) || file.type);
+  if (data && MEDIA.get(id)) MEDIA.get(id).data = data;
   return id;
 }
 function coverDraw(ctx, img, x, y, w, h) {
@@ -1831,8 +1869,7 @@ function openFlyers() {
   flyMode = true;
   document.body.classList.add('flyer-on');
   ui();
-  renderFlyers();
-  paintFlyerToMain(true);
+  mountFlyerAssets().then(() => { renderFlyers(); paintFlyerToMain(true); });
 }
 function closeFlyers() {
   flyMode = false;
@@ -2067,9 +2104,9 @@ function loadProject(pr) {
   CACHE.spr.clear();
   P = pr; P.media = P.media || {}; prepProject();
   const pend = [];
-  Object.entries(P.media).forEach(([id, m]) => { if (m.kind === 'image' && m.data) pend.push(loadImg(m.data).then(async img => { MEDIA.set(id, { id, kind: 'image', el: img, name: m.name, type: m.type || 'image/png' }); try { const blob = await (await fetch(m.data)).blob(); await idbPut('files', { id, name: m.name || 'image', mime: blob.type || m.type || 'image/png', kind: 'image', blob, created: Date.now() }); } catch (err) {} }).catch(() => { })); });
+  Object.entries(P.media).forEach(([id, m]) => { if (m.kind === 'image' && m.data) pend.push(loadImg(m.data).then(async img => { MEDIA.set(id, { id, kind: 'image', el: img, name: m.name, type: m.type || 'image/jpeg', data: m.data }); try { const blob = await (await fetch(m.data)).blob(); await idbPut('files', { id, name: m.name || 'image', mime: blob.type || 'image/jpeg', kind: 'image', buf: await blob.arrayBuffer(), created: Date.now() }); } catch (err) {} }).catch(() => { })); });
   curScene = 0; curEl = null; S.t = 0; S.move = false;
-  Promise.all(pend).then(() => restoreAssetsForProject()).then(() => { computeTL(); renderAll(); seekScene(0); });
+  Promise.all(pend).then(() => restoreAssetsForProject()).then(() => mountFlyerAssets()).then(() => { computeTL(); renderAll(); if (!S.playing) seekScene(0); if (flyMode) paintFlyerToMain(true); });
   computeTL(); renderAll(); render(0); HIST = [snap()]; HI = 0;
 }
 function serialize(withMedia) {
@@ -2078,7 +2115,19 @@ function serialize(withMedia) {
   return { v: 1, name: P.name, scenes: P.scenes, music: P.music, sounds: P.sounds || [], media };
 }
 let saveT = 0;
-function autosave() { clearTimeout(saveT); saveT = setTimeout(() => { try { localStorage.setItem('p2f_studio_v1', JSON.stringify(serialize(false))); } catch (e) { } }, 700); }
+function autosave() {
+  clearTimeout(saveT);
+  saveT = setTimeout(() => {
+    let full = '';
+    try { full = JSON.stringify(serialize(true)); } catch (e) { full = ''; }
+    try {
+      if (full && full.length < 4200000) localStorage.setItem('p2f_studio_v1', full);
+      else localStorage.setItem('p2f_studio_v1', JSON.stringify(serialize(false)));
+    } catch (e) {
+      try { localStorage.setItem('p2f_studio_v1', JSON.stringify(serialize(false))); } catch (e2) {}
+    }
+  }, 500);
+}
 function saveProject() {
   try { const blob = new Blob([JSON.stringify(serialize(true))], { type: 'application/json' }); deliver(blob, (P.name || 'projet').replace(/[^\w\-]+/g, '_') + '.json', 'json'); } catch (e) { toast('Impossible d’enregistrer le projet.'); }
 }
@@ -2152,11 +2201,14 @@ function placeholderLogo() {
   return c.toDataURL('image/png');
 }
 async function setLogo(file) {
-  const img = await loadImg(URL.createObjectURL(file));
-  MEDIA.set('logo', { id: 'logo', kind: 'image', el: img, name: file.name, type: file.type || 'image/png' });
+  let data = '';
+  try { data = (await rememberFile('logo', file, 'logo')) || ''; } catch (e) {}
+  const rec = (FILES || []).find(f => f.id === 'logo');
+  const blob = (rec && asBlob(rec)) || file;
+  const img = await loadImg(URL.createObjectURL(blob));
+  MEDIA.set('logo', { id: 'logo', kind: 'image', el: img, name: file.name, type: (rec && rec.mime) || file.type || 'image/png', data });
   CACHE.halo.clear(); CACHE.refl.clear(); buildStatic(); refresh();
-  try { localStorage.setItem('p2f_logo_v1', mediaData(MEDIA.get('logo'))); } catch (e) { }
-  try { await idbPut('files', { id: 'logo', name: file.name || 'logo', mime: file.type || 'image/png', kind: 'logo', blob: file, created: Date.now() }); FILES = await idbAll('files'); } catch (e) {}
+  try { localStorage.setItem('p2f_logo_v1', data || mediaData(MEDIA.get('logo'))); } catch (e) { }
 }
 
 /* =====================================================================
@@ -2237,17 +2289,25 @@ function soundsBox() {
 let FILES = [], VIDEOS = [], shapeCat = 'Luxe', REC_THUMB = '', REC_VID = null;
 const URLS = new Map();
 const THUMBS = {};
+let _idb = null;
 function idb() {
-  return new Promise((resolve, reject) => {
+  if (_idb) return _idb;
+  _idb = new Promise((resolve, reject) => {
     const req = indexedDB.open('studio-video-pro', 1);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains('files')) db.createObjectStore('files', { keyPath: 'id' });
       if (!db.objectStoreNames.contains('videos')) db.createObjectStore('videos', { keyPath: 'id' });
     };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
+    req.onsuccess = () => {
+      const db = req.result;
+      db.onclose = () => { _idb = null; };
+      db.onversionchange = () => { try { db.close(); } catch (e) {} _idb = null; };
+      resolve(db);
+    };
+    req.onerror = () => { _idb = null; reject(req.error); };
   });
+  return _idb;
 }
 function idbPut(store, value) {
   return idb().then(db => new Promise((resolve, reject) => {
@@ -2279,10 +2339,18 @@ function idbDel(store, id) {
     tx.onerror = () => reject(tx.error);
   }));
 }
+function asBlob(rec) {
+  if (!rec) return null;
+  if (rec.buf && rec.buf.byteLength) return new Blob([rec.buf], { type: rec.mime || 'application/octet-stream' });
+  if (rec.blob && rec.blob.size) return rec.blob;
+  return null;
+}
 function blobURL(rec) {
-  if (!rec || !rec.blob) return '';
+  if (!rec) return '';
   if (URLS.has(rec.id)) return URLS.get(rec.id);
-  const u = URL.createObjectURL(rec.blob);
+  const b = asBlob(rec);
+  if (!b) return rec.data || '';
+  const u = URL.createObjectURL(b);
   URLS.set(rec.id, u);
   return u;
 }
@@ -2308,23 +2376,27 @@ async function mountAsset(id, blob, name, type) {
   return id;
 }
 async function ensureMounted(rec) {
-  if (!rec || !rec.blob) return;
+  if (!rec) return;
   if (rec.kind === 'audio') { if (SNDB.has(rec.id)) return; }
-  else if (MEDIA.has(rec.id)) return;
-  await mountAsset(rec.id, rec.blob, rec.name, rec.mime || rec.type || '');
+  else if (MEDIA.has(rec.id) && MEDIA.get(rec.id).el) return;
+  const blob = asBlob(rec);
+  if (blob) { await mountAsset(rec.id, blob, rec.name, rec.mime || rec.type || ''); return; }
+  if (rec.data) await mountFromData(rec.id, rec.data, rec.name);
 }
 async function restoreAssetsForProject() {
   let all = [];
-  try { all = await idbAll('files'); FILES = all; } catch (e) { return; }
+  try { all = await idbAll('files'); FILES = all; } catch (e) { all = FILES || []; }
   const map = new Map(all.map(f => [f.id, f]));
   const ids = new Set();
   (P.scenes || []).forEach(s => (s.elements || []).forEach(e => { if (e.mid) ids.add(e.mid); }));
   (P.sounds || []).forEach(sd => { if (sd.kind === 'custom' && sd.id) ids.add(sd.id); });
   if (P.music && P.music.fileId) ids.add(P.music.fileId);
   for (const id of ids) {
+    if (MEDIA.has(id) || SNDB.has(id)) continue;
     const f = map.get(id);
-    if (!f || !f.blob) continue;
-    try { await ensureMounted(f); } catch (e) {}
+    if (f) { try { await ensureMounted(f); } catch (e) {} }
+    const meta = P.media && P.media[id];
+    if (!MEDIA.has(id) && !SNDB.has(id) && meta && meta.data) { try { await mountFromData(id, meta.data, meta.name); } catch (e) {} }
   }
   if (P.music && P.music.fileId && SNDB.has(P.music.fileId)) {
     SND.buf = SNDB.get(P.music.fileId);
@@ -2332,8 +2404,27 @@ async function restoreAssetsForProject() {
   }
 }
 async function rememberFile(id, file, kind) {
-  await idbPut('files', { id, name: file.name || id, mime: file.type || '', kind, blob: file, created: Date.now() });
+  const imageKind = kind === 'image' || kind === 'logo';
+  let mime = file.type || '';
+  let buf, data = '';
+  if (imageKind) {
+    try {
+      const url = URL.createObjectURL(file);
+      const img = await loadImg(url);
+      URL.revokeObjectURL(url);
+      const iw = img.naturalWidth || 1, ih = img.naturalHeight || 1, s = Math.min(1, 1400 / Math.max(iw, ih));
+      const c = cv(Math.max(1, Math.round(iw * s)), Math.max(1, Math.round(ih * s)));
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height);
+      const png = /png|webp|gif/.test(mime) || kind === 'logo';
+      data = png ? c.toDataURL('image/png') : c.toDataURL('image/jpeg', .82);
+      const blob = await (await fetch(data)).blob();
+      mime = blob.type || mime;
+      buf = await blob.arrayBuffer();
+    } catch (e) { buf = await file.arrayBuffer(); }
+  } else buf = await file.arrayBuffer();
+  await idbPut('files', { id, name: file.name || id, mime, kind: kind || 'file', buf, created: Date.now() });
   FILES = await idbAll('files');
+  return data;
 }
 
 function shade(hex, t) {
@@ -2907,7 +2998,7 @@ function renderFiles() {
   const box = $('tab-files'); if (!box) return; box.innerHTML = '';
   const b = mk('div', 'box');
   b.append(mk('h3', '', 'Fichiers enregistrés'));
-  b.append(mk('div', 'hint', 'Images, logos, vidéos et sons restent dans ce navigateur (IndexedDB), même après rechargement. Tu peux les reposer sur une scène sans les réimporter.'));
+  b.append(mk('div', 'hint', 'Chaque photo, logo ou son que tu ajoutes est gardé automatiquement sur cet appareil. Après un rechargement, il est toujours là.'));
   const fi = mk('input'); fi.type = 'file'; fi.accept = 'image/*,video/*,audio/*'; fi.multiple = true;
   fi.onchange = async () => {
     const list = [...fi.files];
@@ -2945,9 +3036,9 @@ function renderFiles() {
       try { await idbDel('files', f.id); FILES = await idbAll('files'); if (URLS.has(f.id)) { URL.revokeObjectURL(URLS.get(f.id)); URLS.delete(f.id); } renderFiles(); } catch (e) { toast('Suppression impossible.'); }
     };
     acts.append(use, del);
-    if ((f.kind === 'image' || f.kind === 'logo') && f.blob) {
+    if ((f.kind === 'image' || f.kind === 'logo') && asBlob(f)) {
       const lg = mk('button', 'btn', 'Comme logo'); lg.type = 'button';
-      lg.onclick = async () => { try { await setLogo(new File([f.blob], f.name || 'logo.png', { type: f.mime || 'image/png' })); renderIdent(); toast('Logo mis à jour.'); } catch (e) { toast('Image illisible.'); } };
+      lg.onclick = async () => { try { await setLogo(new File([asBlob(f)], f.name || 'logo.png', { type: f.mime || 'image/png' })); renderIdent(); toast('Logo mis à jour.'); } catch (e) { toast('Image illisible.'); } };
       acts.append(lg);
     }
     meta.append(acts); card.append(meta); grid.append(card);
@@ -3181,7 +3272,7 @@ async function init() {
   try { FILES = await idbAll('files'); VIDEOS = await idbAll('videos'); } catch (e) { FILES = []; VIDEOS = []; }
   try { await mountFlyerAssets(); } catch (e) {}
   let src = null;
-  try { const rec = (FILES || []).find(f => f.id === 'logo'); if (rec && rec.blob) src = URL.createObjectURL(rec.blob); } catch (e) {}
+  try { const rec = (FILES || []).find(f => f.id === 'logo'); const b = asBlob(rec); if (b) src = URL.createObjectURL(b); } catch (e) {}
   if (!src) try { src = localStorage.getItem('p2f_logo_v1'); } catch (e) {}
   let li; try { li = await loadImg(src || A.logo || placeholderLogo()); } catch (e) { li = await loadImg(placeholderLogo()); }
   MEDIA.set('logo', { id: 'logo', kind: 'image', el: li, name: 'Logo Plug 2 France', type: 'image/png' });
