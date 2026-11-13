@@ -137,7 +137,57 @@ const lerp = (a, b, p) => a + (b - a) * p;
 const eoExpo = p => { p = clamp(p); return p >= 1 ? 1 : 1 - Math.pow(2, -10 * p); };
 const eoBack = (p, s = 1.70158) => { p = clamp(p); const q = p - 1; return 1 + (s + 1) * q * q * q + s * q * q; };
 const eio = p => { p = clamp(p); return 3 * p * p - 2 * p * p * p; };
-const cv = (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w)); c.height = Math.max(1, Math.round(h)); return c; };
+const cv = (w, h) => { const c = document.createElement('canvas'); c.width = Math.max(1, Math.round(w) || 1); c.height = Math.max(1, Math.round(h) || 1); return c; };
+const IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+function dropCanvas(c) {
+  if (!c || typeof c.getContext !== 'function') return;
+  try { c.width = 1; c.height = 1; } catch (e) {}
+  if (c.parentNode) c.parentNode.removeChild(c);
+}
+function ctx2d(c) {
+  if (!c) return null;
+  let x = null;
+  try { x = c.getContext('2d'); } catch (e) { x = null; }
+  if (x) return x;
+  // Safari iOS renvoie null si le canvas n'est pas dans la page, ou si le GPU n'a plus de mémoire.
+  try {
+    if (document.body && !c.isConnected) {
+      c.setAttribute('aria-hidden', 'true');
+      c.style.cssText = 'position:fixed;left:0;top:0;width:1px;height:1px;opacity:0;pointer-events:none';
+      document.body.appendChild(c);
+      x = c.getContext('2d');
+    }
+  } catch (e) {}
+  return x || null;
+}
+function drawVignette(ctx, amount) {
+  const a = amount == null ? .62 : +amount;
+  if (!(a > .01) || !ctx || !ctx.canvas) return;
+  const w = ctx.canvas.width, h = ctx.canvas.height;
+  if (!(w > 0 && h > 0)) return;
+  const inner = h * .18, outer = Math.max(inner + 1, h * .62);
+  const vg = ctx.createRadialGradient(w / 2, h / 2, inner, w / 2, h / 2, outer);
+  vg.addColorStop(0, 'rgba(0,0,0,0)');
+  vg.addColorStop(1, 'rgba(0,0,0,' + Math.min(.85, a) + ')');
+  ctx.save();
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  ctx.fillStyle = vg; ctx.fillRect(0, 0, w, h); ctx.restore();
+}
+function allocScene() {
+  dropCanvas(sc);
+  main.width = RES; main.height = Math.round(RES * 16 / 9);
+  sc = cv(main.width, main.height);
+  g = ctx2d(sc);
+  if (!g && RES > 360) {
+    RES = Math.max(360, Math.round(RES * .72));
+    K = RES / W; BS = K * 1.3;
+    dropCanvas(sc);
+    main.width = RES; main.height = Math.round(RES * 16 / 9);
+    sc = cv(main.width, main.height);
+    g = ctx2d(sc);
+  }
+  return g;
+}
 const $ = id => document.getElementById(id);
 const uid = () => Math.random().toString(36).slice(2, 8);
 const clone = o => JSON.parse(JSON.stringify(o));
@@ -148,8 +198,15 @@ function rr(c, x, y, w, h, r) {
 function softBlur(src, shrink, passes = 2) {
   let cur = src;
   for (let i = 0; i < passes; i++) {
-    const s = cv(Math.max(4, cur.width / shrink), Math.max(4, cur.height / shrink)), x = s.getContext('2d'); x.imageSmoothingQuality = 'high'; x.drawImage(cur, 0, 0, s.width, s.height);
-    const b = cv(src.width, src.height), y = b.getContext('2d'); y.imageSmoothingQuality = 'high'; y.drawImage(s, 0, 0, b.width, b.height); cur = b;
+    const s = cv(Math.max(4, cur.width / shrink), Math.max(4, cur.height / shrink)), x = ctx2d(s);
+    if (!x) return cur;
+    x.imageSmoothingQuality = 'high'; x.drawImage(cur, 0, 0, s.width, s.height);
+    const b = cv(Math.max(1, src.width), Math.max(1, src.height)), y = ctx2d(b);
+    if (!y) { dropCanvas(s); return cur; }
+    y.imageSmoothingQuality = 'high'; y.drawImage(s, 0, 0, b.width, b.height);
+    dropCanvas(s);
+    if (cur !== src) dropCanvas(cur);
+    cur = b;
   }
   return cur;
 }
@@ -160,9 +217,9 @@ const fontStr = (key, sz) => FONTS[key] ? `${FONTS[key][0]} ${sz}px ${FONTS[key]
 
 /* ---------- dimensions de rendu ---------- */
 const W = 1080, H = 1920;
-let RES = 720, K = RES / W, BS = K * 1.3;
-const main = $('cv'), mctx = main.getContext('2d');
-let sc = cv(RES, RES * 16 / 9), g = sc.getContext('2d');
+let RES = IOS ? 540 : 720, K = RES / W, BS = K * 1.3;
+const main = $('cv'), mctx = ctx2d(main);
+let sc = null, g = null;
 
 /* ---------- palettes ---------- */
 const PALETTES = {
@@ -477,15 +534,26 @@ function getPhalo(pk) {
   const h = softBlur(pc, 8, 2), h2 = h.getContext('2d'); h2.globalCompositeOperation = 'lighter'; h2.drawImage(h, 0, 0); CACHE.phalo.set(pk, h); return h;
 }
 function buildStatic() {
+  const prev = CACHE.static;
+  if (prev) ['phoneFrame', 'notch', 'tmp', 'vign', 'bgLogo'].forEach(k => dropCanvas(prev[k]));
   const bs = BS, S = CACHE.static = {};
-  S.phoneFrame = cv(600 * bs, 1250 * bs); let x = S.phoneFrame.getContext('2d'); x.scale(bs, bs);
-  x.fillStyle = '#0c0e1a'; rr(x, 0, 0, 600, 1250, 96); x.fill(); x.strokeStyle = '#8caaff'; x.lineWidth = 5; rr(x, 3, 3, 594, 1244, 92); x.stroke();
-  const sg = x.createLinearGradient(0, 18, 0, 1232); sg.addColorStop(0, '#0a122c'); sg.addColorStop(1, '#040610'); x.fillStyle = sg; rr(x, 18, 18, 564, 1214, 78); x.fill();
-  S.notch = cv(600 * bs, 1250 * bs); x = S.notch.getContext('2d'); x.scale(bs, bs); x.fillStyle = '#000'; rr(x, 220, 34, 160, 34, 17); x.fill();
+  S.phoneFrame = cv(600 * bs, 1250 * bs); let x = ctx2d(S.phoneFrame);
+  if (x) {
+    x.scale(bs, bs);
+    x.fillStyle = '#0c0e1a'; rr(x, 0, 0, 600, 1250, 96); x.fill(); x.strokeStyle = '#8caaff'; x.lineWidth = 5; rr(x, 3, 3, 594, 1244, 92); x.stroke();
+    const sg = x.createLinearGradient(0, 18, 0, 1232); sg.addColorStop(0, '#0a122c'); sg.addColorStop(1, '#040610'); x.fillStyle = sg; rr(x, 18, 18, 564, 1214, 78); x.fill();
+  }
+  S.notch = cv(600 * bs, 1250 * bs); x = ctx2d(S.notch);
+  if (x) { x.scale(bs, bs); x.fillStyle = '#000'; rr(x, 220, 34, 160, 34, 17); x.fill(); }
   S.tmp = cv(600 * bs, 1250 * bs);
-  S.vign = cv(RES, RES * 16 / 9); const vx = S.vign.getContext('2d'), vg = vx.createRadialGradient(S.vign.width / 2, S.vign.height / 2, S.vign.height * .18, S.vign.width / 2, S.vign.height / 2, S.vign.height * .62);
-  vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,.62)'); vx.fillStyle = vg; vx.fillRect(0, 0, S.vign.width, S.vign.height);
-  const lm = MEDIA.get('logo'), bg = cv(520, 520 * mH(lm) / mW(lm)); bg.getContext('2d').drawImage(lm.el, 0, 0, bg.width, bg.height); S.bgLogo = softBlur(bg, 12, 3);
+  try {
+    const lm = MEDIA.get('logo');
+    if (lm && mOK(lm)) {
+      const lh = Math.max(1, Math.round(520 * mH(lm) / Math.max(1, mW(lm))));
+      const bg = cv(520, Math.min(1400, lh)), bx = ctx2d(bg);
+      if (bx) { bx.drawImage(lm.el, 0, 0, bg.width, bg.height); S.bgLogo = softBlur(bg, 12, 3); }
+    }
+  } catch (e) { console.warn('logo flou ignoré', e); }
 }
 function getPlace(name, route) {
   const key = name + '|' + route + '|' + BS; if (CACHE.place.has(key)) return CACHE.place.get(key);
@@ -641,7 +709,7 @@ function drawBackground(s, ts, t) {
   if (bg.stars > 0) { g.save(); g.fillStyle = '#fff'; for (let i = 0; i < Math.min(300, bg.stars); i++) { const q = SXY[i]; g.globalAlpha = .3 + .7 * (.5 + .5 * Math.sin(t * 1.8 + q[3])); g.beginPath(); g.arc(q[0], (q[1] + t * 10 * q[2]) % H, q[2] * 1.5, 0, 6.2832); g.fill(); } g.restore(); }
   if (bg.neon) { g.save(); g.globalCompositeOperation = 'lighter'; g.lineWidth = 7; g.lineCap = 'round'; for (let i = 0; i < (bg.neonN || 3); i++) { const y = ((t * (140 + i * 40) + i * 520) % (H + 400)) - 200, col = rgbs(i % 2 ? pal.b : pal.a); g.strokeStyle = `rgba(${col},.9)`; g.shadowColor = `rgb(${col})`; g.shadowBlur = 30 * K; g.beginPath(); g.moveTo(-50, y + 120); g.lineTo(W + 50, y - 120); g.stroke(); } g.restore(); }
   if (bg.lightning) { const kk = Math.floor(t / 1.7), ph = t - kk * 1.7; if (ph < .28) { const r = mulberry(kk * 31 + 7); g.save(); g.globalCompositeOperation = 'lighter'; g.strokeStyle = `rgba(220,235,255,${(1 - ph / .28) * (bg.lightI || .8)})`; g.lineWidth = 9; g.shadowColor = '#9cc0ff'; g.shadowBlur = 40 * K; g.beginPath(); let x = 150 + r() * 780, y = 0; g.moveTo(x, y); while (y < H * .8) { y += 90 + r() * 80; x += (r() - .5) * 170; g.lineTo(x, y); } g.stroke(); g.restore(); } }
-  if (bg.blur) { const b = CACHE.static.bgLogo, bw = 1500 * (1 + .02 * ts), bh = bw * b.height / b.width; g.save(); g.translate(540 + 30 * Math.sin(t * .4), 880); g.rotate(3 * Math.sin(t * .3) * DEG); g.globalAlpha = .75; g.drawImage(b, -bw / 2, -bh / 2, bw, bh); g.restore(); }
+  if (bg.blur && CACHE.static && CACHE.static.bgLogo) { const b = CACHE.static.bgLogo, bw = 1500 * (1 + .02 * ts), bh = bw * b.height / b.width; g.save(); g.translate(540 + 30 * Math.sin(t * .4), 880); g.rotate(3 * Math.sin(t * .3) * DEG); g.globalAlpha = .75; g.drawImage(b, -bw / 2, -bh / 2, bw, bh); g.restore(); }
   if (bg.beams) { beam(120, 780, 1900, -32 + 8 * Math.sin(t * .7), rgbs(pal.a), .5); beam(960, 780, 1900, 32 - 8 * Math.sin(t * .7), rgbs(pal.b), .5); }
   if (bg.rings && ts >= bg.ringsFrom) {
     g.save(); g.globalCompositeOperation = 'lighter'; g.lineWidth = 8;
@@ -663,7 +731,7 @@ function render(t) {
   g.setTransform(K, 0, 0, K, 0, 0); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over';
   drawBackground(s, ts, t);
   s.elements.forEach(e => { g.globalAlpha = 1; g.globalCompositeOperation = 'source-over'; drawEl(e, ts, ts, pal, pk); });
-  g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over'; g.drawImage(CACHE.static.vign, 0, 0);
+  g.setTransform(1, 0, 0, 1, 0, 0); g.globalAlpha = 1; g.globalCompositeOperation = 'source-over'; drawVignette(g, .62);
   let dx = 0, dy = 0, z = 1, fl = 0;
   for (const b of TL.BIG) { const d = t - b.t; if (d >= 0 && d < 1) { const e = Math.exp(-d * 9), q = clamp(b.f / .55, .4, 1); dx += 18 * q * e * Math.sin(d * 75); dy += 14 * q * e * Math.cos(d * 91); z += .05 * q * e; } if (t >= b.t) fl = Math.max(fl, b.f * Math.exp(-(t - b.t) * 12)); }
   for (const h of TL.HITS) { const d = t - h; if (d >= 0 && d < .5) { const e = Math.exp(-d * 12); dx += 6 * e * Math.sin(d * 80); dy += 5 * e * Math.cos(d * 95); z += .018 * e; } }
@@ -1009,7 +1077,7 @@ function renderProjet() {
   lr.onclick = () => { try { localStorage.removeItem('p2f_logo_v1'); } catch (e) { } location.reload(); };
   bl.append(lf, lr, mk('div', 'hint', 'PNG à fond transparent conseillé.')); box.append(bl);
   const b2 = mk('div', 'box'); b2.append(mk('h3', '', 'Exporter'));
-  const q = mk('div', 'row'); q.append(mk('label', '', 'Qualité du rendu')); const sel = mk('select'); [['720', '720p – fluide (par défaut)'], ['1080', '1080p – plus net, plus lourd']].forEach(([v, n]) => { const o = mk('option'); o.value = v; o.textContent = n; if (+v === RES) o.selected = true; sel.append(o); });
+  const q = mk('div', 'row'); q.append(mk('label', '', 'Qualité du rendu')); const sel = mk('select'); [['540', '540p – léger (iPhone, iPad)'], ['720', '720p – fluide'], ['1080', '1080p – plus net, plus lourd']].forEach(([v, n]) => { const o = mk('option'); o.value = v; o.textContent = n; if (+v === RES) o.selected = true; sel.append(o); });
   sel.onchange = () => setRes(parseInt(sel.value, 10)); q.append(sel); b2.append(q);
   const ex = mk('button', 'btn gold', 'Exporter la vidéo'); ex.id = 'bExport'; ex.type = 'button'; ex.style.height = '46px'; ex.onclick = startRecording; b2.append(ex);
   const png = mk('button', 'btn', 'Enregistrer l’image affichée (PNG)'); png.type = 'button'; png.onclick = () => main.toBlob(bl2 => deliver(bl2, 'plug2france-image.png', 'image'), 'image/png'); b2.append(png);
@@ -1051,8 +1119,10 @@ function saveProject() {
   try { const blob = new Blob([JSON.stringify(serialize(true))], { type: 'application/json' }); deliver(blob, (P.name || 'projet').replace(/[^\w\-]+/g, '_') + '.json', 'json'); } catch (e) { toast('Impossible d’enregistrer le projet.'); }
 }
 function setRes(r) {
-  RES = r; K = RES / W; BS = K * 1.3; main.width = RES; main.height = Math.round(RES * 16 / 9); sc = cv(main.width, main.height); g = sc.getContext('2d');
-  CACHE.spr.clear(); CACHE.place.clear(); buildStatic(); render(S.t);
+  const prev = RES;
+  RES = r; K = RES / W; BS = K * 1.3;
+  if (!allocScene()) { RES = prev; K = RES / W; BS = K * 1.3; allocScene(); toast('Cette qualité est trop lourde pour cet appareil.'); }
+  CACHE.spr.clear(); CACHE.place.clear(); buildStatic(); if (g) render(S.t);
 }
 
 /* ---- remise du fichier à l’utilisateur (plusieurs solutions de secours) ---- */
@@ -1207,7 +1277,7 @@ async function init() {
   let src = null; try { src = localStorage.getItem('p2f_logo_v1'); } catch (e) { }
   let li; try { li = await loadImg(src || A.logo || placeholderLogo()); } catch (e) { li = await loadImg(placeholderLogo()); }
   MEDIA.set('logo', { id: 'logo', kind: 'image', el: li, name: 'Logo Plug 2 France', type: 'image/png' });
-  main.width = RES; main.height = Math.round(RES * 16 / 9); sc = cv(main.width, main.height); g = sc.getContext('2d');
+  allocScene();
   buildStatic();
   let start = null; try { const sv = localStorage.getItem('p2f_studio_v1'); if (sv) { start = JSON.parse(sv); if (!start.scenes || !start.scenes.length) start = null; } } catch (e) { start = null; }
   loadProject(start || tplAnnonce());
