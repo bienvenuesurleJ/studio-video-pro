@@ -367,6 +367,15 @@ a.lnk { color: var(--or); font-weight: 750; }
 }
 .fxgrid button small, .angrid button small { display: block; color: var(--mut); font-weight: 550; margin-top: 4px; font-size: 12px; }
 .angrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 8px; }
+body.flyer-on .seekline,
+body.flyer-on #tlbar,
+body.flyer-on #bSound,
+body.flyer-on #bRestart,
+body.flyer-on #bUndo,
+body.flyer-on #bRedo,
+body.flyer-on #bMove,
+body.flyer-on .bigplay { display: none !important; }
+body.flyer-on #bPlay { min-width: 88px; }
 @media (min-width: 900px) {
   :root { --preview-h: min(78vh, 760px); }
   .wrap {
@@ -396,7 +405,7 @@ a.lnk { color: var(--or); font-weight: 750; }
     </div>
     <div class="brand">
       <h1>STUDIO <span>VIDÉO PRO</span></h1>
-      <small>Pubs verticales et reels · Plug 2 France</small>
+      <small>Pubs, reels et flyers · Plug 2 France</small>
     </div>
   </header>
   <div class="notice" id="frameNotice" hidden>Cette page est affichée dans un cadre (aperçu intégré). Les téléchargements y sont souvent bloqués : ouvre-la dans ton navigateur (Chrome ou Safari), ou depuis ton lien GitHub Pages, pour pouvoir enregistrer les vidéos.</div>
@@ -425,6 +434,7 @@ a.lnk { color: var(--or); font-weight: 750; }
     <div class="tabs" id="tabs" role="tablist">
       <button data-tab="scene" class="on" type="button">Scènes</button>
       <button data-tab="els" type="button">Éléments</button>
+      <button data-tab="flyers" type="button">Flyers</button>
       <button data-tab="calques" type="button">Calques</button>
       <button data-tab="fx" type="button">Effets</button>
       <button data-tab="anim" type="button">Animations</button>
@@ -437,6 +447,7 @@ a.lnk { color: var(--or); font-weight: 750; }
 
     <section class="tab on" id="tab-scene"></section>
     <section class="tab" id="tab-els"></section>
+    <section class="tab" id="tab-flyers"></section>
     <section class="tab" id="tab-calques"></section>
     <section class="tab" id="tab-fx"></section>
     <section class="tab" id="tab-anim"></section>
@@ -1060,6 +1071,7 @@ function whipK(t) {
   return k;
 }
 function render(t) {
+  if (flyMode) { paintFlyerToMain(true); return; }
   if (!P || !CACHE.static) return;
   t = clamp(t, 0, TL.dur);
   const SC = sceneAt(t >= TL.dur ? TL.dur - .001 : t), s = SC.s, ts = t - SC.st;
@@ -1161,6 +1173,11 @@ function schedule(from) {
 const S = { t: 0, playing: false, raf: 0, recording: false, move: false, last: 0 };
 const fmt = t => { t = Math.max(0, t); return Math.floor(t / 60) + ':' + String(Math.floor(t % 60)).padStart(2, '0'); };
 function ui() {
+  if (flyMode) {
+    $('bPlay').textContent = 'Pop';
+    $('bigplay').hidden = true;
+    return;
+  }
   $('bPlay').textContent = S.playing ? 'Pause' : (S.t >= TL.dur - .05 ? 'Revoir' : 'Lecture');
   $('bigplay').hidden = S.playing || S.recording;
   const sk = $('seek'); sk.max = TL.dur; sk.value = S.t; $('time').textContent = fmt(S.t) + ' / ' + fmt(TL.dur);
@@ -1186,7 +1203,7 @@ async function play() {
 function pause() { if (!S.playing) return; S.playing = false; if (SND.ac) SND.ac.suspend(); mediaPlay(false); ui(); }
 function seek(t) { S.t = clamp(t, 0, TL.dur); const was = S.playing; S.playing = false; killAudio(); mediaPlay(false); render(S.t); ui(); if (was) play(); }
 function refresh() { computeTL(); S.t = clamp(S.t, 0, TL.dur); if (SND.ac && !S.playing) killAudio(); if (!S.playing) render(S.t); buildTLBar(); ui(); autosave(); histPush(); }
-$('bPlay').onclick = () => S.playing ? pause() : play();
+$('bPlay').onclick = () => { if (flyMode) { playPop(); return; } S.playing ? pause() : play(); };
 $('bigplay').onclick = () => play();
 $('bRestart').onclick = () => { S.playing = false; killAudio(); S.t = 0; play(); };
 $('seek').oninput = e => seek(parseFloat(e.target.value));
@@ -1205,9 +1222,9 @@ function toast(msg) {
 (function () {
   let drag = null;
   const pt = e => { const r = main.getBoundingClientRect(); return [(e.clientX - r.left) / r.width * W, (e.clientY - r.top) / r.height * H]; };
-  main.addEventListener('pointerdown', e => { if (!S.move || !curEl) return; const [x, y] = pt(e); drag = { x, y, ex: curEl.x, ey: curEl.y }; main.setPointerCapture(e.pointerId); e.preventDefault(); });
-  main.addEventListener('pointermove', e => { if (!drag) return; const [x, y] = pt(e); curEl.x = Math.round((drag.ex + x - drag.x) / 5) * 5; curEl.y = Math.round((drag.ey + y - drag.y) / 5) * 5; if (!S.playing) render(S.t); });
-  const end = () => { if (!drag) return; drag = null; renderElForm(); refresh(); };
+  main.addEventListener('pointerdown', e => { if (flyMode) { flyerDown(e); return; } if (!S.move || !curEl) return; const [x, y] = pt(e); drag = { x, y, ex: curEl.x, ey: curEl.y }; main.setPointerCapture(e.pointerId); e.preventDefault(); });
+  main.addEventListener('pointermove', e => { if (flyMode) { flyerMove(e); return; } if (!drag) return; const [x, y] = pt(e); curEl.x = Math.round((drag.ex + x - drag.x) / 5) * 5; curEl.y = Math.round((drag.ey + y - drag.y) / 5) * 5; if (!S.playing) render(S.t); });
+  const end = () => { if (flyMode) { flyerUp(); return; } if (!drag) return; drag = null; renderElForm(); refresh(); };
   main.addEventListener('pointerup', end); main.addEventListener('pointercancel', end);
 })();
 
@@ -1437,6 +1454,514 @@ function renderProjet() {
   const res = mk('div'); res.id = 'result'; b2.append(res); box.append(b2);
 }
 
+/* =====================================================================
+   FLYERS — affiche personnalisée, façon pop
+   ===================================================================== */
+let flyMode = false, FLYERS = [], fly = null, flySel = null, FLYBUF = null, FLYVIEW = { dx: 0, dy: 0, s: 1 }, fdrag = null, popRaf = 0;
+const FLY_KEY = 'p2f_flyers_v1';
+function flyerSize(f) {
+  if (!f || f.format === 'square') return [1080, 1080];
+  if (f.format === 'post') return [1080, 1350];
+  return [1080, 1920];
+}
+function flyerItem(type, over) {
+  return Object.assign({
+    id: uid(), type, x: 540, y: 800, scale: 1, angle: 0,
+    text: 'TEXTE', size: 72, color: '#ffffff', c1: '#f5b800', c2: '#fff6d0',
+    font: 'pop', fileId: null, shapeId: 'spark', w: 720, h: 820, radius: 36
+  }, over);
+}
+function makeTemplate(kind) {
+  const base = { id: 'f' + uid(), name: 'Flyer', format: 'story', preset: kind, bgMode: 'gradient', bgId: null, c1: '#070b16', c2: '#16224a', items: [] };
+  if (kind === 'photo') {
+    base.name = 'Flyer photo';
+    base.bgMode = 'photo';
+    base.items = [
+      flyerItem('band', { y: 250, h: 240, c1: 'rgba(7,11,22,.78)', text: 'TON TITRE', size: 76, color: '#ffffff' }),
+      flyerItem('pill', { text: 'NOUVEAU', x: 230, y: 430, size: 34, c1: '#f5b800', color: '#14110a' }),
+      flyerItem('band', { y: 1680, h: 320, c1: 'rgba(7,11,22,.84)', text: 'Ton accroche ici', size: 52, color: '#ffffff' }),
+      flyerItem('text', { text: 'Choisis ta photo de fond', x: 540, y: 960, size: 34, color: '#ffffff' })
+    ];
+  } else if (kind === 'luxe') {
+    base.name = 'Carte luxe';
+    base.format = 'square';
+    base.c1 = '#0c0a08'; base.c2 = '#2a2112';
+    base.items = [
+      flyerItem('shape', { shapeId: 'laurel', x: 540, y: 520, scale: 3.3, c1: '#f5b800', c2: '#fff6d0' }),
+      flyerItem('shape', { shapeId: 'seal', x: 540, y: 230, scale: 1.05, c1: '#f5b800', c2: '#fff6d0' }),
+      flyerItem('text', { text: 'COLLECTION', x: 540, y: 430, size: 28, color: '#f5b800', font: 'serif' }),
+      flyerItem('text', { text: 'ÉDITION\nPRIVÉE', x: 540, y: 560, size: 76, color: '#fffaf0', font: 'serif' }),
+      flyerItem('pill', { text: 'RÉSERVER', x: 540, y: 860, size: 34, c1: '#f5b800', color: '#1a1408' })
+    ];
+  } else if (kind === 'vide') {
+    base.name = 'Vierge';
+    base.items = [
+      flyerItem('text', { text: 'Ton titre', x: 540, y: 460, size: 84, color: '#ffffff' }),
+      flyerItem('text', { text: 'Ajoute une photo, un prix, un logo.', x: 540, y: 600, size: 32, color: '#c9d4f5' })
+    ];
+  } else {
+    base.name = 'Pop promo';
+    base.preset = 'pop';
+    base.c1 = '#070b18'; base.c2 = '#1b1038';
+    base.items = [
+      flyerItem('shape', { shapeId: 'spark', x: 540, y: 860, scale: 3.2, c1: '#f5b800', c2: '#fff4c2' }),
+      flyerItem('shape', { shapeId: 'crown', x: 540, y: 230, scale: 1.05, c1: '#f5b800', c2: '#fff6d0' }),
+      flyerItem('text', { text: 'OFFRE\nEXCLUSIVE', x: 540, y: 420, size: 86, color: '#ffffff' }),
+      flyerItem('photo', { x: 540, y: 980, w: 760, h: 780, radius: 42 }),
+      flyerItem('pill', { text: '-30%', x: 830, y: 680, size: 58, c1: '#e8202c', color: '#ffffff' }),
+      flyerItem('pill', { text: 'J’EN PROFITE', x: 540, y: 1560, size: 46, c1: '#f5b800', color: '#14110a' }),
+      flyerItem('text', { text: 'Valable cette semaine', x: 540, y: 1700, size: 30, color: '#d5def8' })
+    ];
+  }
+  return base;
+}
+function loadFlyers() {
+  try {
+    const raw = JSON.parse(localStorage.getItem(FLY_KEY) || 'null');
+    if (raw && Array.isArray(raw.list) && raw.list.length) {
+      FLYERS = raw.list;
+      fly = FLYERS.find(f => f.id === raw.current) || FLYERS[0];
+      return;
+    }
+  } catch (e) {}
+  fly = makeTemplate('pop');
+  FLYERS = [fly];
+}
+function saveFlyers() {
+  try { localStorage.setItem(FLY_KEY, JSON.stringify({ current: fly && fly.id, list: FLYERS })); } catch (e) {}
+}
+async function mountFlyerAssets() {
+  const ids = new Set();
+  FLYERS.forEach(f => {
+    if (f.bgId) ids.add(f.bgId);
+    (f.items || []).forEach(it => { if (it.fileId) ids.add(it.fileId); });
+  });
+  for (const id of ids) {
+    const rec = (FILES || []).find(x => x.id === id);
+    if (!rec) continue;
+    try { await ensureMounted(rec); } catch (e) {}
+  }
+}
+function pickImage(cb) {
+  const inp = document.createElement('input');
+  inp.type = 'file'; inp.accept = 'image/*';
+  inp.onchange = () => { const f = inp.files && inp.files[0]; if (f) cb(f); };
+  inp.click();
+}
+async function storeImageFile(file) {
+  const id = 'm' + uid();
+  await rememberFile(id, file, 'image');
+  await mountAsset(id, file, file.name, file.type);
+  return id;
+}
+function coverDraw(ctx, img, x, y, w, h) {
+  const iw = img.naturalWidth || img.width, ih = img.naturalHeight || img.height;
+  if (!iw || !ih) return;
+  const s = Math.max(w / iw, h / ih);
+  const dw = iw * s, dh = ih * s;
+  ctx.drawImage(img, x + (w - dw) / 2, y + (h - dh) / 2, dw, dh);
+}
+function flyFont(it) {
+  const size = it.size || 64;
+  return (it.font === 'serif' ? '700 ' : '800 ') + size + 'px ' + (it.font === 'serif' ? 'Georgia, "Times New Roman", serif' : 'system-ui, sans-serif');
+}
+function drawFlyText(ctx, it) {
+  const lines = String(it.text || '').split('\n');
+  const size = it.size || 64;
+  ctx.font = flyFont(it);
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.fillStyle = it.color || '#fff';
+  ctx.shadowColor = 'rgba(0,0,0,.5)'; ctx.shadowBlur = 14; ctx.shadowOffsetY = 4;
+  const lh = size * 1.08, y0 = -((lines.length - 1) * lh) / 2;
+  lines.forEach((ln, i) => ctx.fillText(ln, 0, y0 + i * lh));
+}
+function drawFlyPill(ctx, it) {
+  const label = String(it.text || 'POP');
+  const size = it.size || 48;
+  ctx.font = '800 ' + size + 'px system-ui, sans-serif';
+  const w = ctx.measureText(label).width + size * 1.15, h = size * 1.45;
+  rr(ctx, -w / 2, -h / 2, w, h, h / 2);
+  ctx.fillStyle = it.c1 || '#f5b800'; ctx.fill();
+  ctx.lineWidth = 3; ctx.strokeStyle = 'rgba(255,255,255,.35)'; ctx.stroke();
+  ctx.fillStyle = it.color || '#14110a';
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.shadowColor = 'transparent';
+  ctx.fillText(label, 0, size * .04);
+}
+function drawFlyPhoto(ctx, it) {
+  const w = it.w || 640, h = it.h || 640, r = it.radius == null ? 32 : it.radius;
+  const m = it.fileId && MEDIA.get(it.fileId);
+  ctx.save();
+  rr(ctx, -w / 2, -h / 2, w, h, r); ctx.clip();
+  if (m && m.kind === 'image' && m.el) coverDraw(ctx, m.el, -w / 2, -h / 2, w, h);
+  else {
+    ctx.fillStyle = '#12182e'; ctx.fillRect(-w / 2, -h / 2, w, h);
+    ctx.fillStyle = '#9aa6c8'; ctx.font = '700 28px system-ui, sans-serif';
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText('TA PHOTO', 0, 0);
+  }
+  ctx.restore();
+  rr(ctx, -w / 2, -h / 2, w, h, r);
+  ctx.lineWidth = 8; ctx.strokeStyle = it.c1 || '#f5b800'; ctx.stroke();
+}
+function drawFlyBand(ctx, it) {
+  const h = it.h || 220;
+  ctx.fillStyle = it.c1 || 'rgba(7,11,22,.8)';
+  ctx.fillRect(-540, -h / 2, 1080, h);
+  drawFlyText(ctx, it);
+}
+function drawFlyItem(ctx, it) {
+  ctx.save();
+  ctx.translate(it.x || 0, it.y || 0);
+  ctx.rotate((it.angle || 0) * DEG);
+  ctx.scale(it.scale || 1, it.scale || 1);
+  if (it.type === 'pill') drawFlyPill(ctx, it);
+  else if (it.type === 'photo') drawFlyPhoto(ctx, it);
+  else if (it.type === 'band') drawFlyBand(ctx, it);
+  else if (it.type === 'shape') {
+    const def = SHAPES[it.shapeId] || SHAPES.spark;
+    ctx.shadowColor = 'rgba(0,0,0,.35)'; ctx.shadowBlur = 18; ctx.shadowOffsetY = 8;
+    if (def) def.draw(ctx, it.c1 || def.c1, it.c2 || def.c2);
+  } else drawFlyText(ctx, it);
+  ctx.restore();
+}
+function flyBox(it) {
+  const sc = it.scale || 1;
+  if (it.type === 'photo') return { hw: (it.w || 640) / 2 * sc, hh: (it.h || 640) / 2 * sc };
+  if (it.type === 'band') return { hw: 540 * sc, hh: (it.h || 220) / 2 * sc };
+  if (it.type === 'shape') return { hw: 120 * sc, hh: 120 * sc };
+  const lines = String(it.text || '').split('\n');
+  const size = (it.size || 64) * sc;
+  const widest = lines.reduce((m, ln) => Math.max(m, ln.length), 1);
+  return { hw: Math.max(70, widest * size * .34), hh: Math.max(36, lines.length * size * .62) };
+}
+function paintFlyer(ctx, f, showSel) {
+  const [fw, fh] = flyerSize(f);
+  ctx.save();
+  ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over'; ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0;
+  const photo = f.bgMode === 'photo' && f.bgId && MEDIA.get(f.bgId);
+  if (photo && photo.el) {
+    coverDraw(ctx, photo.el, 0, 0, fw, fh);
+    ctx.fillStyle = 'rgba(5,8,18,.28)'; ctx.fillRect(0, 0, fw, fh);
+  } else {
+    const gr = ctx.createLinearGradient(0, 0, fw * .2, fh);
+    gr.addColorStop(0, f.c1 || '#070b16'); gr.addColorStop(1, f.c2 || '#16224a');
+    ctx.fillStyle = gr; ctx.fillRect(0, 0, fw, fh);
+    const glow = ctx.createRadialGradient(fw / 2, fh * .42, 30, fw / 2, fh * .46, fw * .72);
+    glow.addColorStop(0, 'rgba(245,184,0,.34)'); glow.addColorStop(.45, 'rgba(42,107,255,.16)'); glow.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = glow; ctx.fillRect(0, 0, fw, fh);
+  }
+  (f.items || []).forEach(it => drawFlyItem(ctx, it));
+  const vg = ctx.createRadialGradient(fw / 2, fh / 2, fh * .2, fw / 2, fh / 2, fh * .72);
+  vg.addColorStop(0, 'rgba(0,0,0,0)'); vg.addColorStop(1, 'rgba(0,0,0,.42)');
+  ctx.fillStyle = vg; ctx.fillRect(0, 0, fw, fh);
+  if (showSel && flySel) {
+    const it = (f.items || []).find(i => i.id === flySel);
+    if (it) {
+      const b = flyBox(it);
+      ctx.save(); ctx.translate(it.x, it.y); ctx.rotate((it.angle || 0) * DEG);
+      ctx.strokeStyle = '#f5b800'; ctx.lineWidth = 4; ctx.setLineDash([14, 10]);
+      ctx.strokeRect(-b.hw - 10, -b.hh - 10, (b.hw + 10) * 2, (b.hh + 10) * 2);
+      ctx.restore();
+    }
+  }
+  ctx.restore();
+}
+function paintFlyerToMain(showSel, popK) {
+  if (!fly || !mctx) return;
+  const [fw, fh] = flyerSize(fly);
+  const scale = IOS ? .67 : 1;
+  if (!FLYBUF || FLYBUF._fw !== fw || FLYBUF._sc !== scale) {
+    dropCanvas(FLYBUF);
+    FLYBUF = cv(Math.max(2, Math.round(fw * scale)), Math.max(2, Math.round(fh * scale)));
+    FLYBUF._fw = fw; FLYBUF._sc = scale;
+  }
+  const x = ctx2d(FLYBUF);
+  if (!x) return;
+  x.setTransform(scale, 0, 0, scale, 0, 0);
+  paintFlyer(x, fly, !!showSel);
+  const mw = main.width, mh = main.height;
+  const fit = Math.min(mw / FLYBUF.width, mh / FLYBUF.height);
+  const dw = FLYBUF.width * fit, dh = FLYBUF.height * fit;
+  const dx = (mw - dw) / 2, dy = (mh - dh) / 2;
+  FLYVIEW = { dx, dy, s: fit * scale, fw, fh };
+  mctx.setTransform(1, 0, 0, 1, 0, 0);
+  mctx.globalAlpha = 1; mctx.fillStyle = '#05070f'; mctx.fillRect(0, 0, mw, mh);
+  const k = popK == null ? 1 : Math.max(.04, popK);
+  mctx.save();
+  mctx.translate(dx + dw / 2, dy + dh / 2);
+  mctx.scale(k, k);
+  mctx.globalAlpha = Math.min(1, .35 + .65 * Math.min(1, k));
+  mctx.drawImage(FLYBUF, -dw / 2, -dh / 2, dw, dh);
+  mctx.restore();
+  mctx.globalAlpha = 1;
+}
+function playPop() {
+  cancelAnimationFrame(popRaf);
+  const t0 = performance.now();
+  const run = now => {
+    const p = clamp((now - t0) / 720);
+    paintFlyerToMain(false, eoBack(p, 1.35));
+    if (p < 1) popRaf = requestAnimationFrame(run);
+    else paintFlyerToMain(true);
+  };
+  popRaf = requestAnimationFrame(run);
+}
+function flyerPoint(e) {
+  const r = main.getBoundingClientRect();
+  const px = (e.clientX - r.left) / r.width * main.width;
+  const py = (e.clientY - r.top) / r.height * main.height;
+  return [(px - FLYVIEW.dx) / (FLYVIEW.s || 1), (py - FLYVIEW.dy) / (FLYVIEW.s || 1)];
+}
+function flyHit(x, y) {
+  const items = (fly && fly.items) || [];
+  for (let i = items.length - 1; i >= 0; i--) {
+    const it = items[i];
+    const ang = -(it.angle || 0) * DEG;
+    const dx = x - it.x, dy = y - it.y;
+    const lx = dx * Math.cos(ang) - dy * Math.sin(ang);
+    const ly = dx * Math.sin(ang) + dy * Math.cos(ang);
+    const b = flyBox(it);
+    if (Math.abs(lx) <= b.hw + 16 && Math.abs(ly) <= b.hh + 16) return it;
+  }
+  return null;
+}
+function flyerDown(e) {
+  if (!fly) return;
+  const [x, y] = flyerPoint(e);
+  const hit = flyHit(x, y);
+  flySel = hit ? hit.id : null;
+  fdrag = hit ? { id: hit.id, x, y, ox: hit.x, oy: hit.y } : null;
+  if (fdrag) { try { main.setPointerCapture(e.pointerId); } catch (err) {} }
+  renderFlyers();
+  paintFlyerToMain(true);
+  e.preventDefault();
+}
+function flyerMove(e) {
+  if (!fdrag || !fly) return;
+  const [x, y] = flyerPoint(e);
+  const it = fly.items.find(i => i.id === fdrag.id);
+  if (!it) return;
+  it.x = Math.round(fdrag.ox + x - fdrag.x);
+  it.y = Math.round(fdrag.oy + y - fdrag.y);
+  paintFlyerToMain(true);
+}
+function flyerUp() {
+  if (!fdrag) return;
+  fdrag = null;
+  saveFlyers();
+}
+function openFlyers() {
+  if (S.playing) pause();
+  killAudio();
+  flyMode = true;
+  document.body.classList.add('flyer-on');
+  ui();
+  renderFlyers();
+  paintFlyerToMain(true);
+}
+function closeFlyers() {
+  flyMode = false;
+  cancelAnimationFrame(popRaf);
+  document.body.classList.remove('flyer-on');
+  if (P && CACHE.static && g) render(S.t);
+  ui();
+}
+function selectedFly() { return fly && (fly.items || []).find(i => i.id === flySel); }
+function touchFly() { saveFlyers(); paintFlyerToMain(true); }
+async function flyerBlob(scale) {
+  const [fw, fh] = flyerSize(fly);
+  const sca = scale || (IOS ? .75 : 1);
+  const c = cv(Math.max(2, Math.round(fw * sca)), Math.max(2, Math.round(fh * sca)));
+  const x = ctx2d(c);
+  if (!x) return null;
+  x.setTransform(sca, 0, 0, sca, 0, 0);
+  paintFlyer(x, fly, false);
+  const blob = await new Promise(res => c.toBlob(res, 'image/png'));
+  dropCanvas(c);
+  return blob;
+}
+function renderFlyers() {
+  const box = $('tab-flyers'); if (!box || !fly) return;
+  box.innerHTML = '';
+  const b0 = mk('div', 'box');
+  b0.append(mk('h3', '', 'Flyers personnalisés'));
+  b0.append(mk('div', 'hint', 'Pose ta photo, un titre et un prix. Glisse sur l’aperçu pour déplacer. Pop montre l’apparition.'));
+  const chips = mk('div', 'chips');
+  FLYERS.forEach(f => {
+    const c = mk('button', 'chip' + (f.id === fly.id ? ' sel' : ''), f.name || 'Flyer');
+    c.type = 'button';
+    c.onclick = () => { fly = f; flySel = null; saveFlyers(); renderFlyers(); paintFlyerToMain(true); };
+    chips.append(c);
+  });
+  const add = mk('button', 'chip', '+ Nouveau'); add.type = 'button';
+  add.onclick = () => { fly = makeTemplate('pop'); FLYERS.push(fly); flySel = null; saveFlyers(); renderFlyers(); paintFlyerToMain(true); };
+  chips.append(add);
+  b0.append(chips);
+  const nm = mk('input'); nm.type = 'text'; nm.value = fly.name || ''; nm.setAttribute('aria-label', 'Nom du flyer');
+  nm.oninput = () => { fly.name = nm.value; saveFlyers(); };
+  b0.append(nm);
+  const tpls = mk('div', 'fxgrid');
+  [['pop', 'Pop promo', 'Titre, photo et prix qui claquent'], ['photo', 'Flyer photo', 'Ton image en fond, bandeaux par-dessus'], ['luxe', 'Carte luxe', 'Carré or et sceau'], ['vide', 'Vierge', 'Tu pars de zéro']].forEach(([k, n, s]) => {
+    const bt = mk('button', '', n + '<small>' + s + '</small>'); bt.type = 'button';
+    bt.onclick = () => {
+      const next = makeTemplate(k); next.id = fly.id;
+      const idx = FLYERS.indexOf(fly);
+      FLYERS[idx] = next; fly = next; flySel = null; saveFlyers(); renderFlyers(); paintFlyerToMain(true);
+    };
+    tpls.append(bt);
+  });
+  b0.append(tpls);
+  box.append(b0);
+
+  const b1 = mk('div', 'box');
+  b1.append(mk('h3', '', 'Fond'));
+  const formats = mk('div', 'btns');
+  [['story', 'Story 9:16'], ['post', 'Post 4:5'], ['square', 'Carré']].forEach(([k, n]) => {
+    const bt = mk('button', 'btn' + (fly.format === k ? ' gold' : ''), n); bt.type = 'button';
+    bt.onclick = () => { fly.format = k; saveFlyers(); renderFlyers(); paintFlyerToMain(true); };
+    formats.append(bt);
+  });
+  b1.append(formats);
+  const cols = mk('div', 'grid2');
+  [['c1', 'Couleur du haut'], ['c2', 'Couleur du bas']].forEach(([k, lab]) => {
+    const row = mk('div', 'row'); row.append(mk('label', '', lab));
+    const inp = mk('input'); inp.type = 'color'; inp.value = /^#/.test(fly[k] || '') ? fly[k] : '#070b16';
+    inp.oninput = () => { fly[k] = inp.value; fly.bgMode = fly.bgId ? fly.bgMode : 'gradient'; touchFly(); };
+    row.append(inp); cols.append(row);
+  });
+  b1.append(cols);
+  const acts = mk('div', 'btns');
+  const bg = mk('button', 'btn gold', 'Photo de fond'); bg.type = 'button';
+  bg.onclick = () => pickImage(async file => {
+    try { fly.bgId = await storeImageFile(file); fly.bgMode = 'photo'; touchFly(); toast('Photo de fond en place.'); }
+    catch (e) { toast('Impossible de lire cette photo.'); }
+  });
+  const clearBg = mk('button', 'btn', 'Fond dégradé'); clearBg.type = 'button';
+  clearBg.onclick = () => { fly.bgMode = 'gradient'; touchFly(); };
+  acts.append(bg, clearBg); b1.append(acts);
+  box.append(b1);
+
+  const b2 = mk('div', 'box');
+  b2.append(mk('h3', '', 'Ajouter sur le flyer'));
+  const adders = mk('div', 'btns');
+  const adder = (label, fn) => { const bt = mk('button', 'btn', label); bt.type = 'button'; bt.onclick = fn; adders.append(bt); };
+  adder('+ Titre', () => { const it = flyerItem('text', { text: 'TON TITRE', y: 480, size: 78 }); fly.items.push(it); flySel = it.id; saveFlyers(); renderFlyers(); paintFlyerToMain(true); });
+  adder('+ Prix', () => { const it = flyerItem('pill', { text: '-20%', x: 780, y: 640, size: 54, c1: '#e8202c', color: '#fff' }); fly.items.push(it); flySel = it.id; saveFlyers(); renderFlyers(); paintFlyerToMain(true); });
+  adder('+ Bouton', () => { const it = flyerItem('pill', { text: 'J’EN PROFITE', y: flyerSize(fly)[1] - 280, size: 42 }); fly.items.push(it); flySel = it.id; saveFlyers(); renderFlyers(); paintFlyerToMain(true); });
+  adder('+ Photo', () => pickImage(async file => {
+    try {
+      const id = await storeImageFile(file);
+      const it = flyerItem('photo', { fileId: id, y: 980 });
+      fly.items.push(it); flySel = it.id; saveFlyers(); renderFlyers(); paintFlyerToMain(true);
+    } catch (e) { toast('Impossible de lire cette photo.'); }
+  }));
+  adder('+ Logo', () => {
+    const it = flyerItem('photo', { fileId: 'logo', y: 220, w: 280, h: 280, radius: 24, c1: 'rgba(0,0,0,0)' });
+    fly.items.push(it); flySel = it.id; saveFlyers(); renderFlyers(); paintFlyerToMain(true);
+  });
+  b2.append(adders);
+  const shapes = mk('div', 'shapegrid');
+  ['spark', 'crown', 'seal', 'laurel', 'percent', 'shop', 'medal', 'verified'].forEach(id => {
+    const def = SHAPES[id] || SHAPES.spark;
+    const real = SHAPES[id] ? id : 'spark';
+    const bt = mk('button', ''); bt.type = 'button';
+    const img = mk('img'); img.alt = ''; img.src = shapeThumb(real); bt.append(img, mk('span', '', (SHAPES[real] && SHAPES[real].name) || def.name || real));
+    bt.onclick = () => {
+      const it = flyerItem('shape', { shapeId: real, scale: 1.4, c1: SHAPES[real].c1, c2: SHAPES[real].c2, y: 700 });
+      fly.items.push(it); flySel = it.id; saveFlyers(); renderFlyers(); paintFlyerToMain(true);
+    };
+    shapes.append(bt);
+  });
+  b2.append(shapes);
+  box.append(b2);
+
+  const it = selectedFly();
+  if (it) {
+    const b3 = mk('div', 'box');
+    b3.append(mk('h3', '', 'Élément choisi'));
+    if (it.type === 'text' || it.type === 'pill' || it.type === 'band') {
+      const ta = mk('textarea'); ta.value = it.text || '';
+      ta.oninput = () => { it.text = ta.value; touchFly(); };
+      b3.append(ta);
+    }
+    const grid = mk('div', 'grid2');
+    const colorRow = (key, label) => {
+      const row = mk('div', 'row'); row.append(mk('label', '', label));
+      const inp = mk('input'); inp.type = 'color';
+      const cur = it[key] && /^#/.test(it[key]) ? it[key] : '#f5b800';
+      inp.value = cur;
+      inp.oninput = () => { it[key] = inp.value; touchFly(); };
+      row.append(inp); return row;
+    };
+    if (it.type !== 'shape') grid.append(colorRow('color', 'Couleur du texte'));
+    if (it.type === 'pill' || it.type === 'shape' || it.type === 'photo' || it.type === 'band') grid.append(colorRow('c1', it.type === 'photo' ? 'Bordure' : 'Couleur'));
+    b3.append(grid);
+    const size = mk('div', 'row');
+    const sl = mk('label', '', 'Taille '); const sb = mk('b', '', String(it.size || 64)); sl.append(sb); size.append(sl);
+    const rng = mk('input'); rng.type = 'range'; rng.min = '18'; rng.max = '160'; rng.step = '1'; rng.value = it.size || 64;
+    rng.oninput = () => { it.size = parseInt(rng.value, 10); sb.textContent = rng.value; touchFly(); };
+    size.append(rng); b3.append(size);
+    const sc = mk('div', 'row');
+    const scl = mk('label', '', 'Échelle '); const scb = mk('b', '', String(it.scale || 1)); scl.append(scb); sc.append(scl);
+    const sr = mk('input'); sr.type = 'range'; sr.min = '0.3'; sr.max = '3'; sr.step = '0.05'; sr.value = it.scale || 1;
+    sr.oninput = () => { it.scale = parseFloat(sr.value); scb.textContent = sr.value; touchFly(); };
+    sc.append(sr); b3.append(sc);
+    if (it.type === 'photo') {
+      const rep = mk('button', 'btn', 'Remplacer la photo'); rep.type = 'button';
+      rep.onclick = () => pickImage(async file => {
+        try { it.fileId = await storeImageFile(file); touchFly(); } catch (e) { toast('Impossible de lire cette photo.'); }
+      });
+      b3.append(rep);
+    }
+    const ops = mk('div', 'btns');
+    const up = mk('button', 'btn', 'Devant'); up.type = 'button';
+    up.onclick = () => { const i = fly.items.indexOf(it); if (i >= 0 && i < fly.items.length - 1) { fly.items.splice(i, 1); fly.items.splice(i + 1, 0, it); touchFly(); } };
+    const down = mk('button', 'btn', 'Derrière'); down.type = 'button';
+    down.onclick = () => { const i = fly.items.indexOf(it); if (i > 0) { fly.items.splice(i, 1); fly.items.splice(i - 1, 0, it); touchFly(); } };
+    const del = mk('button', 'btn red', 'Retirer'); del.type = 'button';
+    del.onclick = () => { fly.items = fly.items.filter(x => x !== it); flySel = null; saveFlyers(); renderFlyers(); paintFlyerToMain(true); };
+    ops.append(up, down, del); b3.append(ops);
+    box.append(b3);
+  }
+
+  const b4 = mk('div', 'box');
+  b4.append(mk('h3', '', 'Exporter'));
+  const out = mk('div', 'btns');
+  const png = mk('button', 'btn gold', 'Télécharger le flyer'); png.type = 'button';
+  png.onclick = async () => {
+    const blob = await flyerBlob(1) || await flyerBlob(.75);
+    if (!blob) { toast('Export impossible sur cet appareil.'); return; }
+    handFile(blob, (fly.name || 'flyer').replace(/[^\w\-]+/g, '_') + '.png');
+  };
+  const into = mk('button', 'btn', 'Mettre dans la vidéo'); into.type = 'button';
+  into.onclick = async () => {
+    const blob = await flyerBlob(IOS ? .75 : 1);
+    if (!blob) { toast('Impossible de préparer le flyer.'); return; }
+    const file = new File([blob], (fly.name || 'flyer') + '.png', { type: 'image/png' });
+    try {
+      const id = await storeImageFile(file);
+      const el = newEl('image', { src: 'upload', mid: id, shape: 'full', t0: .15, anim: 'pop', halo: false, label: fly.name || 'FLYER', y: 960, w: 1000 });
+      P.scenes[curScene].elements.push(el); curEl = el;
+      closeFlyers();
+      refresh();
+      const tab = document.querySelector('#tabs button[data-tab="scene"]');
+      if (tab) tab.click();
+      toast('Flyer placé dans la scène, avec l’effet pop.');
+    } catch (e) { toast('Impossible d’ajouter le flyer à la vidéo.'); }
+  };
+  const pop = mk('button', 'btn', 'Rejouer le pop'); pop.type = 'button'; pop.onclick = () => playPop();
+  const dup = mk('button', 'btn', 'Dupliquer'); dup.type = 'button';
+  dup.onclick = () => { const c = clone(fly); c.id = 'f' + uid(); c.name = (fly.name || 'Flyer') + ' copie'; FLYERS.push(c); fly = c; flySel = null; saveFlyers(); renderFlyers(); paintFlyerToMain(true); };
+  const rm = mk('button', 'btn red', 'Supprimer ce flyer'); rm.type = 'button';
+  rm.onclick = () => {
+    if (FLYERS.length < 2) { toast('Garde au moins un flyer.'); return; }
+    FLYERS = FLYERS.filter(f => f !== fly); fly = FLYERS[0]; flySel = null; saveFlyers(); renderFlyers(); paintFlyerToMain(true);
+  };
+  out.append(png, into, pop, dup, rm); b4.append(out);
+  box.append(b4);
+}
+loadFlyers();
+
 /* ----- tout reconstruire ----- */
 function renderAll() { renderScene(); renderEls(); renderCalques(); renderFx(); renderAnim(); renderFiles(); renderVideos(); renderIdent(); renderSon(); renderProjet(); buildTLBar(); ui(); }
 document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
@@ -1454,6 +1979,8 @@ document.querySelectorAll('#tabs button').forEach(b => b.onclick = () => {
   else if (tab === 'ident') renderIdent();
   else if (tab === 'son') renderSon();
   else if (tab === 'projet') renderProjet();
+  else if (tab === 'flyers') openFlyers();
+  if (tab !== 'flyers' && flyMode) closeFlyers();
 });
 
 /* =====================================================================
@@ -2439,6 +2966,7 @@ async function init() {
     } catch (e) { console.warn('police intégrée indisponible', e); }
   }
   try { FILES = await idbAll('files'); VIDEOS = await idbAll('videos'); } catch (e) { FILES = []; VIDEOS = []; }
+  try { await mountFlyerAssets(); } catch (e) {}
   let src = null;
   try { const rec = (FILES || []).find(f => f.id === 'logo'); if (rec && rec.blob) src = URL.createObjectURL(rec.blob); } catch (e) {}
   if (!src) try { src = localStorage.getItem('p2f_logo_v1'); } catch (e) {}
