@@ -432,6 +432,7 @@ body.flyer-on #bPlay { min-width: 88px; }
 
   <div class="panel">
     <div class="tabs" id="tabs" role="tablist">
+      <button data-tab="ia" type="button">🤖 Mon assistant IA</button>
       <button data-tab="scene" class="on" type="button">Scènes</button>
       <button data-tab="els" type="button">Éléments</button>
       <button data-tab="flyers" type="button">Flyers</button>
@@ -445,6 +446,7 @@ body.flyer-on #bPlay { min-width: 88px; }
       <button data-tab="projet" type="button">Projet</button>
     </div>
 
+    <section class="tab" id="tab-ia"></section>
     <section class="tab on" id="tab-scene"></section>
     <section class="tab" id="tab-els"></section>
     <section class="tab" id="tab-flyers"></section>
@@ -1222,7 +1224,7 @@ function schedule(from) {
     const gn = ac.createGain(); gn.gain.setValueAtTime(E, t0); gn.gain.exponentialRampToValueAtTime(v, t0 + dur); gn.gain.setValueAtTime(0, t0 + dur + .01); o.connect(gn); gn.connect(out); o.start(t0); o.stop(t0 + dur + .02);
     const s = ac.createBufferSource(); s.buffer = SND.noise; s.loop = true; const hp = ac.createBiquadFilter(); hp.type = 'highpass'; hp.frequency.setValueAtTime(800, t0); hp.frequency.exponentialRampToValueAtTime(7000, t0 + dur);
     const g2 = ac.createGain(); g2.gain.setValueAtTime(E, t0); g2.gain.exponentialRampToValueAtTime(v * .8, t0 + dur); g2.gain.setValueAtTime(0, t0 + dur + .01); s.connect(hp); hp.connect(g2); g2.connect(out); s.start(t0, 0); s.stop(t0 + dur + .02); };
-  if (M.mode === 'perso' && SND.buf && from < SND.buf.duration) { const s = ac.createBufferSource(); s.buffer = SND.buf; const gn = ac.createGain(); gn.gain.value = .9; s.connect(gn); gn.connect(out); s.start(base, from); }
+  if (M.mode === 'perso' && SND.buf) { const st = M.start || 0, T0 = M.offset || 0, T1 = T0 + Math.max(.1, Math.min(M.end || SND.buf.duration, SND.buf.duration) - st); if (from < T1) { const s = ac.createBufferSource(); s.buffer = SND.buf; const gn = ac.createGain(), v = M.mvol == null ? .9 : M.mvol, fi = M.fadeIn || 0, fo = M.fadeOut || 0, ta = Math.max(T0, from); s.connect(gn); gn.connect(out); gn.gain.setValueAtTime(fi && ta < T0 + fi ? v * (ta - T0) / fi : v, at(ta)); if (fi && ta < T0 + fi) gn.gain.linearRampToValueAtTime(v, at(T0 + fi)); if (fo) { const a = Math.max(ta, T0 + fi, T1 - fo); gn.gain.setValueAtTime(v, at(a)); gn.gain.linearRampToValueAtTime(0, at(T1)); } s.start(at(ta), st + (ta - T0), T1 - ta); } }
   if (M.sfx) {
     TL.BIG.forEach(b => { if (ok(b.t)) boom(at(b.t), b.g); });
     TL.HITS.forEach(h => { if (ok(h)) hit(at(h), .6); });
@@ -3543,6 +3545,174 @@ function startStudio() {
   init().catch(e => { console.error(e); document.body.insertAdjacentHTML('afterbegin', '<p style="color:#ff8a8a;padding:12px">Erreur de chargement : ' + (e && e.message) + '</p>'); });
 }
 window.startStudio = startStudio;
+</script>
+<script>
+/* ===== EXTENSION v2 : assistant IA, musiques, renommage, modèles (ajoutée sans toucher au moteur) ===== */
+(function () {
+  const NK = 'p2f_names_v1', nm = () => { try { return JSON.parse(localStorage.getItem(NK) || '{}'); } catch (e) { return {}; } };
+  function applyNames() { const n = nm(); FILES.forEach(f => { if (n[f.id]) f.name = n[f.id]; }); MEDIA.forEach((m, id) => { if (n[id]) m.name = n[id]; }); }
+  const catOf = f => (f.kind === 'logo' || /logo/i.test(f.name || '')) ? 'logo' : f.kind;
+  const CATS = [['all', 'Toutes'], ['image', 'Photos'], ['video', 'Vidéos'], ['audio', 'Musiques'], ['logo', 'Logos']]; let cat = 'all';
+
+  /* ---- Fichiers : renommer + catégories ---- */
+  const _rf = renderFiles;
+  renderFiles = function () {
+    applyNames(); _rf();
+    const box = document.querySelector('#tab-files .box'); if (!box) return;
+    const list = FILES.filter(f => f.id !== 'logo').slice().sort((a, c) => (c.created || 0) - (a.created || 0));
+    const cards = [...box.querySelectorAll('.fcard')];
+    const row = mk('div', 'chips'); CATS.forEach(([k, l]) => { const b = mk('button', 'chip' + (k === cat ? ' on' : ''), l); b.type = 'button'; b.onclick = () => { cat = k; renderFiles(); }; row.append(b); });
+    box.querySelector('h3').after(row);
+    cards.forEach((c, i) => {
+      const f = list[i]; if (!f) return;
+      if (cat !== 'all' && catOf(f) !== cat) c.style.display = 'none';
+      const rn = mk('button', 'btn', '✏️ RENOMMER'); rn.type = 'button';
+      rn.onclick = () => {
+        const v = prompt('Nouveau nom :', f.name || ''); if (v == null || !v.trim()) return;
+        const n = nm(); n[f.id] = v.trim().slice(0, 80); try { localStorage.setItem(NK, JSON.stringify(n)); } catch (e) { toast('Nom non gardé (stockage plein).'); }
+        applyNames(); renderFiles(); renderSon(); renderEls(); toast('Renommé.');
+      };
+      const a = c.querySelector('.vacts'); if (a) a.append(rn);
+    });
+  };
+
+  /* ---- Son : MES MUSIQUES ENREGISTRÉES ---- */
+  let pv = null, pvId = null;
+  const stopPv = () => { if (pv) { pv.pause(); pv = null; pvId = null; } };
+  const fmtOf = f => ((f.mime || '').split('/')[1] || (f.name || '').split('.').pop() || '?').toUpperCase();
+  const _rs = renderSon;
+  renderSon = function () {
+    applyNames(); _rs();
+    const M = P.music, box = $('tab-son'), b = mk('div', 'box'); b.append(mk('h3', '', 'MES MUSIQUES ENREGISTRÉES'));
+    const au = FILES.filter(f => f.kind === 'audio');
+    if (!au.length) b.append(mk('div', 'hint', 'Aucune musique. Importe-en dans l’onglet Fichiers : elle apparaîtra ici sans réimport.'));
+    au.forEach(f => {
+      const used = M.mode === 'perso' && M.fileId === f.id, d = SNDB.get(f.id);
+      const r = mk('div', 'row'); r.append(mk('b', '', (f.name || 'Musique') + (used ? ' ● utilisée' : '')), mk('small', '', ' ' + fmtOf(f) + (d ? ' · ' + fmt(d.duration) : '')));
+      const play = mk('button', 'btn', '▶'), pause = mk('button', 'btn', '⏸'), sel = mk('button', 'btn gold', used ? 'Utilisée' : 'Sélectionner');
+      [play, pause, sel].forEach(x => x.type = 'button');
+      play.onclick = async () => { try { stopPv(); const u = blobURL(f); if (!u) throw 0; pv = new Audio(u); pvId = f.id; pv.play(); } catch (e) { toast('Musique illisible : ' + (f.name || '')); } };
+      pause.onclick = stopPv;
+      sel.onclick = async () => {
+        try { await ensureMounted(f); const buf = SNDB.get(f.id); if (!buf) throw 0; stopPv(); SND.buf = buf; SND.bufName = f.name; M.fileId = f.id; M.mode = 'perso'; M.end = 0; refresh(); renderSon(); toast('Musique intégrée au montage.'); }
+        catch (e) { toast('Impossible de charger cette musique.'); }
+      };
+      r.append(play, pause, sel); b.append(r);
+    });
+    if (M.mode === 'perso' && SND.buf) {
+      b.append(mk('h3', '', 'Réglages de la musique'));
+      [['mvol', 'Volume', 0, 1, .05, .9], ['start', 'Début dans le fichier (s)', 0, 600, .1, 0], ['end', 'Fin dans le fichier (s, 0 = jusqu’au bout)', 0, 600, .1, 0], ['fadeIn', 'Fondu entrant (s)', 0, 30, .1, 0], ['fadeOut', 'Fondu sortant (s)', 0, 30, .1, 0], ['offset', 'Décalage dans la vidéo (s)', 0, 120, .1, 0]].forEach(([k, l, mn, mx, st, df]) => {
+        const r = mk('div', 'row'); r.append(mk('label', '', l)); const i = mk('input'); i.type = 'number'; i.min = mn; i.max = mx; i.step = st; i.value = M[k] == null ? df : M[k];
+        i.onchange = () => { M[k] = Math.max(mn, Math.min(mx, +i.value || 0)); refresh(); }; r.append(i); b.append(r);
+      });
+    }
+    box.append(b);
+  };
+
+  /* ---- Modèles : 12 nouveaux, doublon « Commerce certifié » retiré de la liste ---- */
+  const G = (k, n, d, bg, st, tx, an, tr, mus, sc, bx) => [k, n, d, () => ({
+    name: n, music: Object.assign({}, NOMUSIC, { beatTo: 99 }, mus), media: {},
+    scenes: sc.map(([sn, du, im, L, o]) => { o = o || {}; const { n: _n, ...ts } = TXS[tx];
+      return newScene({ name: sn, dur: du, trans: o.tr || tr, impact: !!o.imp, bg: Object.assign({}, DEFBG, BGP[bg], bx || {}), elements: [
+        ...(im ? [newEl('image', { src: 'upload', mid: null, shape: 'card', w: 780, y: im === 2 ? 640 : 900, t0: .2, anim: an, label: 'PHOTO', zoom0: im === 2 ? 1.5 : 1.2 })] : []),
+        ...L.map((t, i) => i ? newEl('text', Object.assign({ text: t, size: 80, y: (im ? 1400 : 930) + i * 150, t0: .5 + i * .35, anim: 'rise' }, ts)) : newEl('banner', { text: t, style: st, size: 100, y: im ? 1250 : 760, t0: .4, anim: an }))] }); }) })];
+  const NEW = [
+    G('pubprod', 'Publicité produit', 'Gros plans, zooms, prix et caractéristiques.', 'commerce', 'gold', 'd3', 'impactzoom', 'whip', { bpm: 128, beatFrom: 2, dropFrom: 6 }, [['Accroche', 2.5, 0, ['NOUVEAU', 'LE PRODUIT QU’IL TE FAUT'], { imp: 1 }], ['Gros plan', 3, 2, ['DÉCOUVRE-LE']], ['Zoom détails', 3, 1, ['QUALITÉ PREMIUM', 'Matière · Finition']], ['Prix', 3, 0, ['SEULEMENT 00 €', 'Livraison rapide'], { imp: 1 }], ['Achat', 2.5, 0, ['COMMANDE MAINTENANT', 'Adresse du site']]]),
+    G('promo', 'Promotion et réduction', 'Pourcentage, prix avant/après, bandeaux, appel à l’achat.', 'degrade', 'red', 'd3', 'stamp', 'zoom', { bpm: 132, beatFrom: 1, dropFrom: 4 }, [['Flash', 2, 0, ['PROMO FLASH', '-30 %'], { imp: 1 }], ['Prix avant/après', 3, 1, ['00 € → 00 €', 'Prix barré · Prix promo']], ['Bandeau', 3, 2, ['JUSQU’À DIMANCHE']], ['Achat', 3, 0, ['PROFITE-EN VITE', 'Adresse du site'], { imp: 1 }]]),
+    G('marque', 'Présentation de marque', 'Logo, identité, activité, images, conclusion.', 'noir', 'silver', 'luxe', 'fade', 'fade', { bpm: 90, beatFrom: 3, dropFrom: 9 }, [['Logo', 3, 0, ['NOM DE LA MARQUE', 'Notre identité']], ['Activité', 4, 1, ['QUI SOMMES-NOUS', 'Notre activité']], ['Galerie', 4, 2, ['NOS RÉALISATIONS']], ['Conclusion', 3, 0, ['MERCI DE VOTRE CONFIANCE', 'Adresse du site']]]),
+    G('cine', 'Vidéo cinématique', 'Ambiance cinéma, transitions fluides, textes élégants.', 'noir', 'black', 'cine', 'blur', 'dip', { bpm: 70, beatFrom: 4, dropFrom: 12, vol: .7 }, [['Ouverture', 4, 0, ['UNE HISTOIRE', 'Titre élégant']], ['Plan lent', 5, 1, ['L’INSTANT']], ['Lumière', 5, 2, ['RESSENTIR']], ['Fin', 4, 0, ['À BIENTÔT']]], { bars: true, grain: .25, vignette: .8, beams: true }),
+    G('story', 'Storytelling', 'Accroche, histoire, progression, conclusion mémorable.', 'espace', 'blue', 'moderne', 'rise', 'slide', { bpm: 100, beatFrom: 3, dropFrom: 10 }, [['Accroche', 3, 0, ['ET SI TOUT COMMENÇAIT ICI ?']], ['Le début', 4, 1, ['IL ÉTAIT UNE FOIS…']], ['Le défi', 4, 1, ['PUIS TOUT A CHANGÉ']], ['La solution', 4, 2, ['NOUS AVONS TROUVÉ']], ['Morale', 3, 0, ['ET VOUS ?', 'Adresse du site']]]),
+    G('avap', 'Avant / Après', 'Comparaison de deux situations avec transition de balayage.', 'mini', 'white', 'moderne', 'slide-right', 'wipe', { bpm: 110, beatFrom: 2, dropFrom: 8 }, [['Avant', 4, 1, ['AVANT', 'La situation de départ']], ['Après', 4, 1, ['APRÈS', 'Le résultat']], ['Différence', 3, 0, ['VOIS LA DIFFÉRENCE']], ['Contact', 3, 0, ['PRENDS RENDEZ-VOUS', 'Adresse du site']]]),
+    G('temoin', 'Témoignage client', 'Citation animée, photo, avis, conclusion commerciale.', 'luxe', 'gold', 'luxe', 'fade', 'dip', { bpm: 85, beatFrom: 3, dropFrom: 9 }, [['Client', 3, 2, ['TÉMOIGNAGE', 'Prénom · Ville']], ['Citation', 5, 0, ['« UN SERVICE AU TOP ! »']], ['Preuve', 4, 1, ['★★★★★', 'Avis vérifié']], ['Appel', 3, 0, ['REJOINS NOS CLIENTS', 'Adresse du site']]]),
+    G('resto', 'Restaurant et alimentation', 'Plats, gros plans, menu et tarifs, établissement.', 'luxe', 'gold', 'luxe', 'zoom', 'zoom', { bpm: 100, beatFrom: 2, dropFrom: 8 }, [['Bienvenue', 3, 0, ['NOM DU RESTAURANT', 'Cuisine maison']], ['Plat 1', 3, 2, ['PLAT DU JOUR', '00 €']], ['Plat 2', 3, 2, ['SPÉCIALITÉ', '00 €']], ['Menu', 4, 0, ['LE MENU', 'Entrée · Plat · Dessert']], ['Adresse', 3, 0, ['VIENS NOUS VOIR', 'Adresse · Horaires']]]),
+    G('event', 'Événement', 'Annonce, date, lieu et compte à rebours visuel.', 'futur', 'neon', 'neon', 'stamp', 'whip', { bpm: 124, beatFrom: 1, dropFrom: 5 }, [['Annonce', 2.5, 0, ['GRANDE SOIRÉE'], { imp: 1 }], ['Date', 3, 0, ['SAMEDI 00/00', 'À 20 H']], ['Lieu', 3, 1, ['LIEU', 'Adresse']], ['Compte à rebours', 4, 0, ['J-3', 'J-2', 'J-1']], ['Venez', 3, 0, ['ENTRÉE LIBRE', 'Adresse du site'], { imp: 1 }]]),
+    G('social', 'Réseaux sociaux', 'Vertical 9:16, accroche immédiate, rythme rapide.', 'degrade', 'red', 'd3', 'impactzoom', 'whip', { bpm: 140, beatFrom: 0, dropFrom: 2 }, [['Accroche', 1.5, 0, ['ATTENDS…', 'TU VAS ADORER'], { imp: 1 }], ['Plan 1', 2, 2, ['CE QUE TU VAS VOIR']], ['Plan 2', 2, 1, ['LE MEILLEUR MOMENT']], ['Plan 3', 2, 1, ['ET ÇA CONTINUE']], ['Appel', 2, 0, ['ABONNE-TOI', '@moncompte'], { imp: 1 }]]),
+    G('unbox', 'Unboxing et présentation', 'Colis, déballage, détails, avantages, verdict.', 'noir', 'silver', 'metal', 'rise', 'slide', { bpm: 105, beatFrom: 3, dropFrom: 9 }, [['Colis', 3, 0, ['UNBOXING', 'Qu’y a-t-il dedans ?']], ['Déballage', 4, 2, ['ON OUVRE']], ['Détails', 4, 1, ['LES DÉTAILS', 'Matière · Finition']], ['Avantages', 4, 0, ['ON ADORE', 'Pratique · Solide · Beau']], ['Verdict', 3, 0, ['VERDICT', 'Adresse du site']]]),
+    G('tuto', 'Vidéo tutorielle', 'Étapes numérotées, titres et sous-titres, conclusion.', 'mini', 'blue', 'moderne', 'slide-left', 'slide', { bpm: 90, beatFrom: 4, dropFrom: 60, vol: .5 }, [['Titre', 3, 0, ['COMMENT FAIRE ?', 'Tutoriel en 3 étapes']], ['Étape 1', 5, 1, ['ÉTAPE 1', 'Prépare ton matériel']], ['Étape 2', 5, 1, ['ÉTAPE 2', 'Suis la démonstration']], ['Étape 3', 5, 1, ['ÉTAPE 3', 'Vérifie le résultat']], ['Conclusion', 3, 0, ['À TOI DE JOUER !', 'Adresse du site']]])
+  ];
+  { const i = TEMPLATES.findIndex(t => t[0] === 'commerce'); if (i >= 0) TEMPLATES.splice(i, 1); NEW.forEach(t => TEMPLATES.splice(TEMPLATES.length - 1, 0, t)); }
+
+  /* ---- Assistant IA : outils structurés, aucune exécution de code ---- */
+  const TR = ['whip', 'cut', 'fade', 'dip', 'wipe', 'slide', 'zoom'], AIH = [];
+  const num = (v, a, b, d) => { v = +v; return isFinite(v) ? Math.max(a, Math.min(b, v)) : d; };
+  const rec = id => FILES.find(f => f.id === id);
+  const syncBuf = () => { const id = P.music.fileId; if (P.music.mode === 'perso' && id && SNDB.has(id)) { SND.buf = SNDB.get(id); SND.bufName = (rec(id) || {}).name || 'musique'; } };
+  const need = new Set();
+  function mkEl(a) {
+    const t = ['banner', 'text', 'image'].includes(a.type) ? a.type : 'text', o = {};
+    if (t !== 'image') { o.text = String(a.text || '').slice(0, 120); o.size = num(a.size, 30, 400, t === 'banner' ? 100 : 84); }
+    if (t === 'banner' && STY[a.style]) o.style = a.style;
+    if (t === 'text' && TXS[a.preset]) { const { n, ...r } = TXS[a.preset]; Object.assign(o, r); }
+    o.y = num(a.y, 100, 1820, t === 'image' ? 900 : 700); o.t0 = num(a.t0, 0, 60, .3);
+    if (ANIM_OPTS.some(x => x[0] === a.anim)) o.anim = a.anim;
+    if (t === 'image') { o.src = 'upload'; o.w = num(a.w, 200, 1080, 780); const f = rec(a.media_id); if (f) { o.mid = f.id; o.label = f.name; o.shape = f.kind === 'video' ? 'full' : 'card'; need.add(f.id); } }
+    return newEl(t, o);
+  }
+  const mkScene = a => newScene({ name: String(a.name || 'Scène').slice(0, 40), dur: num(a.dur, 1, 30, 4), trans: TR.includes(a.trans) ? a.trans : 'whip', impact: !!a.impact, bg: Object.assign({}, DEFBG, BGP[a.bg] || BGP.commerce), elements: (a.elements || []).slice(0, 14).map(mkEl) });
+  const sceneAt = i => P.scenes[num(i, 0, P.scenes.length - 1, 0)];
+  const TOOLS = {
+    build_project(a) { if (!Array.isArray(a.scenes) || !a.scenes.length) throw new Error('scénario vide'); if (a.name) P.name = String(a.name).slice(0, 60); P.scenes = a.scenes.slice(0, 20).map(mkScene); },
+    load_template(a) { const t = TEMPLATES.find(x => x[0] === a.key); if (!t) throw new Error('modèle inconnu'); const p = t[3](); P.scenes = p.scenes; P.music = p.music; P.name = p.name; },
+    edit_scene(a) { const s = sceneAt(a.index); if (a.name) s.name = String(a.name).slice(0, 40); if (a.dur != null) s.dur = num(a.dur, 1, 30, s.dur); if (TR.includes(a.trans)) s.trans = a.trans; if (BGP[a.bg]) Object.assign(s.bg, DEFBG, BGP[a.bg]); if (a.impact != null) s.impact = !!a.impact; },
+    delete_scene(a) { if (P.scenes.length < 2) throw new Error('il faut garder une scène'); P.scenes.splice(num(a.index, 0, P.scenes.length - 1, 0), 1); },
+    add_scene(a) { P.scenes.splice(num(a.position, 0, P.scenes.length, P.scenes.length), 0, mkScene(a)); },
+    set_element(a) { const s = sceneAt(a.scene); if (a.remove) { s.elements.splice(num(a.index, 0, s.elements.length - 1, 0), 1); return; } const p = a.props || {}; const e = s.elements[a.index]; if (!e) { s.elements.push(mkEl(p)); return; }
+      if (p.text != null) e.text = String(p.text).slice(0, 120); ['size', 'y', 't0'].forEach(k => { if (p[k] != null) e[k] = num(p[k], 0, 2000, e[k]); }); if (ANIM_OPTS.some(x => x[0] === p.anim)) e.anim = p.anim; if (STY[p.style]) e.style = p.style; if (p.media_id && rec(p.media_id)) { e.mid = p.media_id; need.add(p.media_id); } },
+    set_music(a) { const M = P.music; if (a.mode === 'none') { M.mode = 'none'; return; } if (a.file_id) { const f = rec(a.file_id); if (!f || f.kind !== 'audio') throw new Error('musique introuvable'); need.add(f.id); M.fileId = f.id; M.mode = 'perso'; } if (a.mode === 'auto') M.mode = 'auto';
+      [['vol', 'mvol', 0, 1], ['start', 'start', 0, 600], ['end', 'end', 0, 600], ['fade_in', 'fadeIn', 0, 30], ['fade_out', 'fadeOut', 0, 30], ['offset', 'offset', 0, 120]].forEach(([k, d, mn, mx]) => { if (a[k] != null) M[d] = num(a[k], mn, mx, 0); }); },
+    scale_duration(a) { const tot = P.scenes.reduce((x, s) => x + s.dur, 0), k = num(a.total_seconds, 5, 180, tot) / tot; P.scenes.forEach(s => { s.dur = +Math.max(1, s.dur * k).toFixed(2); s.elements.forEach(e => { e.t0 = +(e.t0 * k).toFixed(2); if (e.t1 != null) e.t1 = +(e.t1 * k).toFixed(2); }); }); }
+  };
+  async function afterApply() {
+    for (const id of need) { try { await ensureMounted(rec(id)); } catch (e) { toast('Média illisible : ' + ((rec(id) || {}).name || id)); } } need.clear();
+    prepProject(); syncBuf(); curScene = 0; curEl = null; CACHE.spr.clear(); killAudio(); computeTL(); S.t = clamp(S.t, 0, TL.dur); refresh(); renderAll(); try { seekScene(0); } catch (e) {} try { saveLocal(false); } catch (e) {}
+  }
+  const AS = new Set(); let AC = []; let log, prog, ta, selM, selT, epI;
+  const say = (who, txt) => { const d = mk('div', 'hint'); d.style.cssText = 'padding:8px 10px;border-radius:10px;background:' + (who === 'me' ? '#142252' : '#0c1428') + ';border:1px solid var(--line);white-space:pre-wrap'; d.textContent = (who === 'me' ? 'Moi : ' : 'IA : ') + txt; log.append(d); log.scrollTop = log.scrollHeight; };
+  const summary = () => ({ name: P.name, music: P.music, scenes: P.scenes.map((s, i) => ({ index: i, name: s.name, dur: s.dur, trans: s.trans, elements: s.elements.map((e, j) => ({ i: j, type: e.type, text: e.text, anim: e.anim, y: e.y, t0: e.t0, media: e.mid })) })) });
+  const endpoint = () => (window.P2F_AI_ENDPOINT || localStorage.getItem('p2f_ai_endpoint') || '/api/assistant');
+  async function send() {
+    const txt = ta.value.trim(); if (!txt) { toast('Écris ce que tu veux.'); return; }
+    say('me', txt); ta.value = ''; AC.push({ role: 'user', content: txt }); AC = AC.slice(-12);
+    const media = FILES.filter(f => f.id !== 'logo' && (!AS.size || AS.has(f.id) || f.id === selM.value)).map(f => { const m = MEDIA.get(f.id), d = SNDB.get(f.id); return { id: f.id, name: f.name, kind: catOf(f), duration: d ? +d.duration.toFixed(1) : undefined, w: m && m.el && mW(m) || undefined, h: m && m.el && mH(m) || undefined }; });
+    AIH.push(snap()); prog.style.display = 'block'; prog.removeAttribute('value');
+    try {
+      const r = await fetch(endpoint(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: AC, project: summary(), media, selectedMusic: selM.value || null, template: selT.value || null, templates: TEMPLATES.map(t => [t[0], t[1]]), styles: Object.keys(STY), presets: Object.keys(BGP), anims: ANIM_OPTS.map(a => a[0]), texts: Object.keys(TXS) }) });
+      if (!r.ok) throw new Error(r.status === 404 ? 'Serveur IA introuvable (voir LISEZ-MOI : adresse du serveur).' : 'Le serveur IA a répondu ' + r.status);
+      const d = await r.json(); let ok = 0;
+      for (const c of d.calls || []) { try { if (!TOOLS[c.name]) throw new Error('outil inconnu'); TOOLS[c.name](c.args || {}); ok++; } catch (e) { say('ia', '⚠ ' + c.name + ' : ' + e.message); } }
+      if (ok) await afterApply(); else AIH.pop();
+      if (d.reply) { say('ia', d.reply); AC.push({ role: 'assistant', content: d.reply }); }
+    } catch (e) { AIH.pop(); say('ia', '⚠ ' + (e.message || 'Erreur réseau') + ' Ton montage n’a pas été modifié.'); }
+    prog.style.display = 'none';
+  }
+  function fillIA() {
+    if (!selM) return;
+    const fm = selM.value; selM.innerHTML = '<option value="">Musique : aucune / actuelle</option>'; FILES.filter(f => f.kind === 'audio').forEach(f => selM.append(new Option('♪ ' + f.name, f.id))); selM.value = fm;
+    const ft = selT.value; selT.innerHTML = '<option value="">Modèle : aucun</option>'; TEMPLATES.forEach(t => selT.append(new Option(t[1], t[0]))); selT.value = ft;
+    const mb = document.getElementById('iaMedia'); if (mb) { mb.innerHTML = ''; FILES.filter(f => f.id !== 'logo').forEach(f => { const l = mk('label', 'hint'); l.style.display = 'block'; const c = mk('input'); c.type = 'checkbox'; c.checked = AS.has(f.id); c.onchange = () => c.checked ? AS.add(f.id) : AS.delete(f.id); l.append(c, ' ' + f.name + ' (' + catOf(f) + ')'); mb.append(l); }); }
+  }
+  function buildIA() {
+    const box = $('tab-ia'), b = mk('div', 'box'); b.append(mk('h3', '', '🤖 MON ASSISTANT IA'));
+    b.append(mk('div', 'hint', 'Décris ta vidéo librement. L’IA règle les scènes, textes, transitions et la musique ; tu regardes le résultat dans l’aperçu avant d’exporter.'));
+    log = mk('div'); log.style.cssText = 'display:grid;gap:6px;max-height:260px;overflow:auto'; b.append(log);
+    ta = mk('textarea'); ta.rows = 4; ta.placeholder = 'Ex. : vidéo pub pro de 30 s, montage dynamique, zooms, textes percutants, termine par mon logo et mon site.'; ta.style.cssText = 'width:100%;font:inherit;padding:10px;border-radius:12px;background:var(--card2);color:var(--txt);border:1px solid var(--line)';
+    const det = mk('details', 'grp'); det.append(mk('summary', '', '📎 Joindre des médias (aucun coché = tous)')); det.append(Object.assign(mk('div'), { id: 'iaMedia' }));
+    selM = mk('select'); selT = mk('select'); prog = mk('progress'); prog.style.cssText = 'display:none;width:100%';
+    const go = mk('button', 'btn gold', 'GÉNÉRER MON MONTAGE'), un = mk('button', 'btn', '↶ Annuler la dernière modification IA'), ac = mk('button', 'btn', '✓ Accepter'), re = mk('button', 'btn red', 'Recommencer');
+    [go, un, ac, re].forEach(x => x.type = 'button'); go.onclick = send;
+    un.onclick = () => { if (!AIH.length) { toast('Rien à annuler.'); return; } const o = JSON.parse(AIH.pop()); P.scenes = o.scenes; P.music = o.music; P.sounds = o.sounds || []; afterApply(); toast('Modification IA annulée.'); };
+    ac.onclick = () => { try { saveLocal(false); } catch (e) {} };
+    re.onclick = () => { if (!AIH.length) return; const o = JSON.parse(AIH[0]); AIH.length = 0; P.scenes = o.scenes; P.music = o.music; P.sounds = o.sounds || []; afterApply(); say('ia', 'Montage remis dans son état d’avant l’assistant.'); };
+    epI = mk('input'); epI.placeholder = 'Adresse du serveur IA (ex. https://mon-site.vercel.app/api/assistant)'; epI.value = localStorage.getItem('p2f_ai_endpoint') || ''; epI.onchange = () => { try { localStorage.setItem('p2f_ai_endpoint', epI.value.trim()); } catch (e) {} };
+    const ep = mk('details', 'grp'); ep.append(mk('summary', '', '⚙ Serveur IA'), epI);
+    b.append(ta, det, selM, selT, go, prog, mk('div', 'chips'), un, ac, re, ep); box.append(b); fillIA();
+    say('ia', 'Bonjour ! Dis-moi quelle vidéo tu veux (sujet, durée, ambiance, texte, musique) ou écris simplement tes instructions.');
+  }
+  const _ra = renderAll; renderAll = function () { _ra(); fillIA(); };
+  const nav = document.querySelector('#tabs button[data-tab="ia"]'); if (nav) nav.onclick = () => { document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('on', x === nav)); document.querySelectorAll('section.tab').forEach(s => s.classList.toggle('on', s.id === 'tab-ia')); fillIA(); };
+  const wait = setInterval(() => { if (window.STUDIO && window.STUDIO.ready) { clearInterval(wait); buildIA(); renderFiles(); renderSon(); } }, 300);
+})();
+
 if (document.readyState === 'complete') setTimeout(startStudio, 0);
 else window.addEventListener('load', startStudio);
 </script>
