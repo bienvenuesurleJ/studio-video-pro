@@ -444,6 +444,7 @@ body.flyer-on #bPlay { min-width: 88px; }
       <button data-tab="ident" type="button">Identité</button>
       <button data-tab="son" type="button">Son</button>
       <button data-tab="projet" type="button">Projet</button>
+      <button data-tab="admin" type="button">🔐 Admin</button>
     </div>
 
     <section class="tab" id="tab-ia"></section>
@@ -458,6 +459,7 @@ body.flyer-on #bPlay { min-width: 88px; }
     <section class="tab" id="tab-ident"></section>
     <section class="tab" id="tab-son"></section>
     <section class="tab" id="tab-projet"></section>
+    <section class="tab" id="tab-admin"></section>
   </div>
 </div>
 
@@ -3645,7 +3647,7 @@ window.startStudio = startStudio;
     if (t === 'text' && TXS[a.preset]) { const { n, ...r } = TXS[a.preset]; Object.assign(o, r); }
     o.y = num(a.y, 100, 1820, t === 'image' ? 900 : 700); o.t0 = num(a.t0, 0, 60, .3);
     if (ANIM_OPTS.some(x => x[0] === a.anim)) o.anim = a.anim;
-    if (t === 'image') { o.src = 'upload'; o.w = num(a.w, 200, 1080, 780); const f = rec(a.media_id); if (f) { o.mid = f.id; o.label = f.name; o.shape = f.kind === 'video' ? 'full' : 'card'; need.add(f.id); } }
+    if (t === 'image') { if (a.media_id === 'logo') { o.src = 'logo'; o.shape = 'free'; o.w = 800; o.anim = 'impactzoom'; o.zoom0 = 3; return newEl(t, o); } o.src = 'upload'; o.w = num(a.w, 200, 1080, 780); const f = rec(a.media_id); if (f) { o.mid = f.id; o.label = f.name; o.shape = f.kind === 'video' ? 'full' : 'card'; need.add(f.id); } }
     return newEl(t, o);
   }
   const mkScene = a => newScene({ name: String(a.name || 'Scène').slice(0, 40), dur: num(a.dur, 1, 30, 4), trans: TR.includes(a.trans) ? a.trans : 'whip', impact: !!a.impact, bg: Object.assign({}, DEFBG, BGP[a.bg] || BGP.commerce), elements: (a.elements || []).slice(0, 14).map(mkEl) });
@@ -3670,15 +3672,51 @@ window.startStudio = startStudio;
   const say = (who, txt) => { const d = mk('div', 'hint'); d.style.cssText = 'padding:8px 10px;border-radius:10px;background:' + (who === 'me' ? '#142252' : '#0c1428') + ';border:1px solid var(--line);white-space:pre-wrap'; d.textContent = (who === 'me' ? 'Moi : ' : 'IA : ') + txt; log.append(d); log.scrollTop = log.scrollHeight; };
   const summary = () => ({ name: P.name, music: P.music, scenes: P.scenes.map((s, i) => ({ index: i, name: s.name, dur: s.dur, trans: s.trans, elements: s.elements.map((e, j) => ({ i: j, type: e.type, text: e.text, anim: e.anim, y: e.y, t0: e.t0, media: e.mid })) })) });
   const endpoint = () => (window.P2F_AI_ENDPOINT || localStorage.getItem('p2f_ai_endpoint') || '/api/assistant');
+  const hasEP = () => !!(window.P2F_AI_ENDPOINT || localStorage.getItem('p2f_ai_endpoint'));
+  const KW = { pubprod: ['produit'], promo: ['promo', 'reduction', 'solde'], marque: ['marque'], cine: ['cinema', 'cinematique'], story: ['storytelling', 'histoire'], avap: ['avant'], temoin: ['temoignage'], resto: ['restaurant', 'menu', 'plat'], event: ['evenement', 'soiree', 'ouverture'], social: ['tiktok', 'reels', 'shorts', 'reseaux'], unbox: ['unboxing', 'deballage'], tuto: ['tuto', 'etape'], presentation: ['boutique', 'commerce'], certif: ['certif'], flyer: ['flyer', 'affiche'], annonce: ['application'] };
+  function localBot(txt) {
+    const t = txt.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''), calls = [], R = [], has = re => re.test(t), n = P.scenes.length, C = (name, args) => calls.push({ name, args });
+    const secs = (t.match(/(\d+)\s*(?:s\b|sec)/) || [])[1], tot = P.scenes.reduce((x, s) => x + s.dur, 0);
+    const key = selT.value || Object.keys(KW).find(k => KW[k].some(w => t.includes(w)));
+    const ids = FILES.filter(f => (f.kind === 'image' || f.kind === 'video') && f.id !== 'logo' && (!AS.size || AS.has(f.id)));
+    const hard = has(/supprim|raccourci|remplace|agrandi|plus gros|rends|rend |mets|ajoute|sans musique|fondu|appel a l.action|version plus|plus pro|plus dynamique|plus de transitions/);
+    const edit = hard || (!has(/fais|cree|genere|realise|monte/) && has(/dynamique|\bpro\b|professionnel|transition|logo|musique/));
+    const each = fn => P.scenes.forEach((s, i) => fn(s, i));
+    if (edit) {
+      if (has(/dynamique/)) { each((s, i) => { C('edit_scene', { index: i, trans: 'whip', impact: true }); s.elements.forEach((e, j) => C('set_element', { scene: i, index: j, props: { anim: 'impactzoom' } })); }); R.push('Plus dynamique : transitions rapides, impacts et zooms.'); }
+      if (has(/professionnel|\bpro\b/)) { each((s, i) => { C('edit_scene', { index: i, trans: i % 2 ? 'fade' : 'dip', bg: 'luxe' }); s.elements.forEach((e, j) => { if (e.type === 'banner') C('set_element', { scene: i, index: j, props: { style: 'silver' } }); }); }); R.push('Version plus professionnelle : fondus, fond luxe, bandeaux argentés.'); }
+      else if (has(/transition/)) { const tr = ['whip', 'zoom', 'wipe', 'slide', 'dip']; each((s, i) => C('edit_scene', { index: i, trans: tr[i % 5] })); R.push('Transitions variées sur toutes les scènes.'); }
+      if (has(/agrandi|plus gros/)) { each((s, i) => s.elements.forEach((e, j) => { if (e.type !== 'image') C('set_element', { scene: i, index: j, props: { size: Math.min(400, Math.round((e.size || 100) * 1.25)) } }); })); R.push('Textes agrandis de 25 %.'); }
+      if (has(/logo/)) { const end = has(/fin|termine|conclu/); C('add_scene', { position: end ? n : 0, name: 'Logo', dur: 3, impact: true, bg: 'noir', elements: [{ type: 'image', media_id: 'logo', y: 800 }] }); R.push('Scène logo ajoutée ' + (end ? 'à la fin.' : 'au début.')); }
+      if (has(/appel a l.action/)) { C('add_scene', { position: n, name: 'Appel', dur: 3, impact: true, bg: 'commerce', elements: [{ type: 'banner', text: 'COMMANDE MAINTENANT', style: 'gold', y: 800 }, { type: 'text', text: 'Adresse du site', y: 1100, t0: .8 }] }); R.push('Appel à l’action ajouté en dernière scène : remplace « Adresse du site ».'); }
+      if (has(/sans musique/)) { C('set_music', { mode: 'none' }); R.push('Musique retirée.'); }
+      else if (has(/musique|fondu/)) { if (selM.value) { C('set_music', { file_id: selM.value, fade_in: has(/fondu/) ? 2 : undefined, fade_out: has(/fondu/) ? 2 : undefined }); R.push('Musique remplacée.'); } else if (P.music.mode === 'perso' && has(/fondu/)) { C('set_music', { fade_in: 2, fade_out: 2 }); R.push('Fondus de 2 s ajoutés.'); } else R.push('Choisis d’abord une musique dans la liste « Musique », puis redis-le.'); }
+      if (secs || has(/raccourci/)) { C('scale_duration', { total_seconds: secs ? +secs : Math.round(tot * .75) }); R.push('Durée totale ajustée.'); }
+      const del = t.match(/supprim\w*\D*(\d+)/); if (del && +del[1] <= n && n > 1) { C('delete_scene', { index: +del[1] - 1 }); R.push('Scène ' + del[1] + ' supprimée.'); }
+    } else if (key) {
+      C('load_template', { key }); let k = 0; TEMPLATES.find(x => x[0] === key)[3]().scenes.forEach((s, j) => s.elements.forEach((e, l) => { if (e.type === 'image' && ids[k]) C('set_element', { scene: j, index: l, props: { media_id: ids[k++].id } }); }));
+      if (secs) C('scale_duration', { total_seconds: +secs }); R.push('Modèle « ' + TEMPLATES.find(x => x[0] === key)[1] + ' » chargé' + (k ? ' avec ' + k + ' média(s)' : '') + '. Remplace les textes « 00 € » et « Adresse du site » par les tiens.');
+    } else if (ids.length) {
+      const q = (txt.match(/[«"“]([^»"”]+)[»"”]/) || [])[1], sub = (q || (txt.match(/pour\s+([^,.]{3,40})/i) || [])[1] || 'MA VIDÉO').toUpperCase(), tr = ['whip', 'zoom', 'wipe', 'slide'];
+      const sc = [{ name: 'Intro', dur: 3, impact: true, bg: 'commerce', elements: [{ type: 'banner', text: sub, style: 'gold', y: 800, anim: 'impactzoom' }] }];
+      ids.slice(0, 8).forEach((f, i) => sc.push({ name: 'Média ' + (i + 1), dur: 3.5, bg: i % 2 ? 'degrade' : 'noir', trans: tr[i % 4], elements: [{ type: 'image', media_id: f.id, y: 900 }] }));
+      sc.push({ name: 'Fin', dur: 3.5, impact: true, bg: 'commerce', elements: [{ type: 'image', media_id: 'logo', y: 700 }, { type: 'banner', text: 'Adresse du site', style: 'gold', y: 1300, t0: .8 }] });
+      C('build_project', { name: sub.slice(0, 40), scenes: sc }); if (secs) C('scale_duration', { total_seconds: +secs });
+      R.push('Montage créé avec ' + Math.min(8, ids.length) + ' média(s) : intro, tes médias, puis logo et adresse. Remplace « Adresse du site » par ton vrai texte.');
+    } else R.push('Je ne crée rien sans tes médias : importe des photos ou vidéos dans Fichiers (ou coche-les dans 📎), choisis un modèle ou décris ta vidéo.');
+    if (!edit && calls.length && selM.value) { C('set_music', { file_id: selM.value }); R.push('Ta musique choisie est intégrée.'); }
+    if (!calls.length && !R.length) R.push('Je comprends : « plus dynamique », « plus professionnel », « plus de transitions », « agrandis les textes », « supprime la 3ème scène », « logo au début », « termine avec un appel à l’action », « raccourcis à 15 secondes », « sans musique », ou le nom d’un modèle (restaurant, promo, tiktok…).');
+    return { reply: R.join('\n'), calls };
+  }
   async function send() {
     const txt = ta.value.trim(); if (!txt) { toast('Écris ce que tu veux.'); return; }
     say('me', txt); ta.value = ''; AC.push({ role: 'user', content: txt }); AC = AC.slice(-12);
     const media = FILES.filter(f => f.id !== 'logo' && (!AS.size || AS.has(f.id) || f.id === selM.value)).map(f => { const m = MEDIA.get(f.id), d = SNDB.get(f.id); return { id: f.id, name: f.name, kind: catOf(f), duration: d ? +d.duration.toFixed(1) : undefined, w: m && m.el && mW(m) || undefined, h: m && m.el && mH(m) || undefined }; });
     AIH.push(snap()); prog.style.display = 'block'; prog.removeAttribute('value');
     try {
-      const r = await fetch(endpoint(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: AC, project: summary(), media, selectedMusic: selM.value || null, template: selT.value || null, templates: TEMPLATES.map(t => [t[0], t[1]]), styles: Object.keys(STY), presets: Object.keys(BGP), anims: ANIM_OPTS.map(a => a[0]), texts: Object.keys(TXS) }) });
+      const d = !hasEP() ? localBot(txt) : await (async () => { const r = await fetch(endpoint(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: AC, project: summary(), media, selectedMusic: selM.value || null, template: selT.value || null, templates: TEMPLATES.map(t => [t[0], t[1]]), styles: Object.keys(STY), presets: Object.keys(BGP), anims: ANIM_OPTS.map(a => a[0]), texts: Object.keys(TXS) }) });
       if (!r.ok) throw new Error(r.status === 404 ? 'Serveur IA introuvable (voir LISEZ-MOI : adresse du serveur).' : 'Le serveur IA a répondu ' + r.status);
-      const d = await r.json(); let ok = 0;
+      return await r.json(); })(); let ok = 0;
       for (const c of d.calls || []) { try { if (!TOOLS[c.name]) throw new Error('outil inconnu'); TOOLS[c.name](c.args || {}); ok++; } catch (e) { say('ia', '⚠ ' + c.name + ' : ' + e.message); } }
       if (ok) await afterApply(); else AIH.pop();
       if (d.reply) { say('ia', d.reply); AC.push({ role: 'assistant', content: d.reply }); }
@@ -3706,7 +3744,7 @@ window.startStudio = startStudio;
     epI = mk('input'); epI.placeholder = 'Adresse du serveur IA (ex. https://mon-site.vercel.app/api/assistant)'; epI.value = localStorage.getItem('p2f_ai_endpoint') || ''; epI.onchange = () => { try { localStorage.setItem('p2f_ai_endpoint', epI.value.trim()); } catch (e) {} };
     const ep = mk('details', 'grp'); ep.append(mk('summary', '', '⚙ Serveur IA'), epI);
     b.append(ta, det, selM, selT, go, prog, mk('div', 'chips'), un, ac, re, ep); box.append(b); fillIA();
-    say('ia', 'Bonjour ! Dis-moi quelle vidéo tu veux (sujet, durée, ambiance, texte, musique) ou écris simplement tes instructions.');
+    say('ia', hasEP() ? 'Bonjour ! Dis-moi quelle vidéo tu veux (sujet, durée, ambiance, texte, musique) ou écris simplement tes instructions.' : 'Bonjour ! Mode GRATUIT intégré (sans clé ni serveur) : je comprends des ordres simples (« plus dynamique », « logo au début », « raccourcis à 15 secondes », nom d’un modèle…). Pour une vraie IA libre et gratuite, branche un serveur (⚙ en bas).');
   }
   const _ra = renderAll; renderAll = function () { _ra(); fillIA(); };
   const nav = document.querySelector('#tabs button[data-tab="ia"]'); if (nav) nav.onclick = () => { document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('on', x === nav)); document.querySelectorAll('section.tab').forEach(s => s.classList.toggle('on', s.id === 'tab-ia')); fillIA(); };
@@ -3717,9 +3755,82 @@ if (document.readyState === 'complete') setTimeout(startStudio, 0);
 else window.addEventListener('load', startStudio);
 </script>
 <script>
+/* ===== ADMIN : sauvegarde / synchronisation entre téléphones (Supabase, compte privé) ===== */
+(function () {
+  const L = (k, v) => v === undefined ? localStorage.getItem(k) : (v === null ? localStorage.removeItem(k) : localStorage.setItem(k, v));
+  const cfg = () => { const c = window.P2F_CLOUD || {}; return { url: (c.url || L('p2f_cloud_url') || '').replace(/\/$/, ''), key: c.key || L('p2f_cloud_key') || '' }; };
+  const SK = 'p2f_cloud_session', KEYS = ['p2f_projects_v1', 'p2f_studio_v1', 'p2f_names_v1', 'p2f_flyers_v1'];
+  let msg, busy = false;
+  const say = t => { if (msg) msg.textContent = t; };
+  const pack = d => ({ access: d.access_token, refresh: d.refresh_token, uid: d.user.id, email: d.user.email, exp: Date.now() + d.expires_in * 1000 });
+  const J = o => { try { return JSON.parse(o); } catch (e) { return null; } };
+  async function token() {
+    const c = cfg(); let s = J(L(SK)); if (!s) throw new Error('Connecte-toi d’abord.');
+    if (Date.now() > s.exp - 60000) { const r = await fetch(c.url + '/auth/v1/token?grant_type=refresh_token', { method: 'POST', headers: { apikey: c.key, 'Content-Type': 'application/json' }, body: JSON.stringify({ refresh_token: s.refresh }) }); if (!r.ok) { L(SK, null); throw new Error('Session expirée : reconnecte-toi.'); } s = pack(await r.json()); L(SK, JSON.stringify(s)); }
+    return s;
+  }
+  async function login(email, pw) { const c = cfg(); const r = await fetch(c.url + '/auth/v1/token?grant_type=password', { method: 'POST', headers: { apikey: c.key, 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password: pw }) }); if (!r.ok) throw new Error('Email ou mot de passe incorrect.'); L(SK, JSON.stringify(pack(await r.json()))); }
+  const H = (s, x) => Object.assign({ apikey: cfg().key, Authorization: 'Bearer ' + s.access }, x);
+  async function put(s, path, body, type) { const r = await fetch(cfg().url + '/storage/v1/object/studio/' + s.uid + '/' + path, { method: 'POST', headers: H(s, { 'x-upsert': 'true', 'Content-Type': type || 'application/octet-stream' }), body }); if (!r.ok) throw new Error('Envoi refusé (' + r.status + ') : ' + path); }
+  async function get(s, path) { const r = await fetch(cfg().url + '/storage/v1/object/authenticated/studio/' + s.uid + '/' + path, { headers: H(s) }); if (r.status === 400 || r.status === 404) return null; if (!r.ok) throw new Error('Lecture refusée (' + r.status + ')'); return r; }
+  async function list(s, prefix) { const r = await fetch(cfg().url + '/storage/v1/object/list/studio', { method: 'POST', headers: H(s, { 'Content-Type': 'application/json' }), body: JSON.stringify({ prefix: s.uid + '/' + prefix, limit: 1000 }) }); if (!r.ok) throw new Error('Liste refusée (' + r.status + ')'); return (await r.json()).map(x => x.name); }
+  async function backup() {
+    const s = await token(); say('Envoi des projets…'); const data = {}; KEYS.forEach(k => { const v = L(k); if (v) data[k] = v; }); data.at = Date.now();
+    await put(s, 'data.json', JSON.stringify(data), 'application/json');
+    const have = new Set(await list(s, 'files')), idx = []; let n = 0, skip = 0;
+    for (const f of FILES) {
+      idx.push({ id: f.id, name: f.name, mime: f.mime, kind: f.kind, created: f.created });
+      if (have.has(f.id) && f.id !== 'logo') continue;
+      let b = asBlob(f); if (!b && f.data) { try { b = await (await fetch(f.data)).blob(); } catch (e) {} }
+      if (!b) { skip++; continue; } say('Envoi des fichiers… ' + (++n)); await put(s, 'files/' + f.id, b, f.mime);
+    }
+    await put(s, 'files.json', JSON.stringify(idx), 'application/json'); L('p2f_cloud_last', String(data.at)); return { n, skip };
+  }
+  async function restore(quiet) {
+    const s = await token(); const r = await get(s, 'data.json'); if (!r) { if (quiet) return null; throw new Error('Rien dans le cloud : sauvegarde d’abord depuis ton autre téléphone.'); }
+    const d = await r.json(); if (quiet && d.at <= +(L('p2f_cloud_last') || 0)) return null; say('Récupération…');
+    const a = J(L('p2f_projects_v1')) || {}, b = J(d.p2f_projects_v1) || {}; Object.keys(b).forEach(k => { if (!a[k] || (b[k].date || 0) > (a[k].date || 0)) a[k] = b[k]; });
+    try { L('p2f_projects_v1', JSON.stringify(a)); } catch (e) { throw new Error('Stockage du téléphone plein : libère de la place.'); }
+    L('p2f_names_v1', JSON.stringify(Object.assign({}, J(L('p2f_names_v1')) || {}, J(d.p2f_names_v1) || {})));
+    ['p2f_studio_v1', 'p2f_flyers_v1'].forEach(k => { if (d[k] && !L(k)) L(k, d[k]); });
+    let got = 0, fail = 0; const fi = await get(s, 'files.json');
+    if (fi) for (const m of await fi.json()) {
+      if (FILES.some(f => f.id === m.id && (asBlob(f) || f.data))) continue;
+      try { const rr = await get(s, 'files/' + m.id); if (!rr) continue; say('Téléchargement : ' + (m.name || m.id)); const blob = await rr.blob(); await rememberFile(m.id, new File([blob], m.name || m.id, { type: m.mime || blob.type }), m.kind); got++; } catch (e) { fail++; }
+    }
+    L('p2f_cloud_last', String(d.at)); renderAll(); return { got, fail };
+  }
+  let tm = 0; const sched = () => { if (L('p2f_cloud_auto') !== '1' || !J(L(SK)) || busy) return; clearTimeout(tm); tm = setTimeout(() => backup().catch(() => {}), 20000); };
+  const _sn = saveNow; saveNow = function () { _sn(); sched(); }; const _sl = saveLocal; saveLocal = function (x) { _sl(x); sched(); };
+  const run = async (fn, ok) => { if (busy) return; busy = true; try { const r = await fn(); say(ok(r)); toast(ok(r)); } catch (e) { say('⚠ ' + (e.message || 'Erreur réseau')); } busy = false; };
+  function renderAdmin() {
+    const box = $('tab-admin'); box.innerHTML = ''; const b = mk('div', 'box'); b.append(mk('h3', '', '🔐 ADMIN – mes dossiers sur tous mes téléphones'));
+    b.append(mk('div', 'hint', 'Sauvegarde tes projets et ta bibliothèque (photos, vidéos, musiques, noms) dans ton espace privé, puis retrouve-les sur n’importe quel téléphone en te connectant.'));
+    msg = mk('div', 'hint'); const c = cfg(), s = J(L(SK)); const inp = (ph, type, val) => { const i = mk('input'); i.placeholder = ph; i.type = type || 'text'; i.value = val || ''; i.style.cssText = 'width:100%;padding:10px;border-radius:12px;background:var(--card2);color:var(--txt);border:1px solid var(--line)'; return i; };
+    const btn = (l, cls, fn) => { const x = mk('button', 'btn ' + cls, l); x.type = 'button'; x.onclick = fn; return x; };
+    if (!c.url || !c.key) {
+      const u = inp('Adresse du projet (https://xxxx.supabase.co)'), k = inp('Clé « anon / publishable »');
+      b.append(u, k, btn('Enregistrer la configuration', 'gold', () => { if (!/^https:\/\//.test(u.value.trim()) || !k.value.trim()) { say('Adresse ou clé manquante.'); return; } L('p2f_cloud_url', u.value.trim()); L('p2f_cloud_key', k.value.trim()); renderAdmin(); }), mk('div', 'hint', 'Astuce : colle ces deux valeurs une seule fois dans le fichier HTML (window.P2F_CLOUD, tout en bas) et tous tes téléphones seront déjà configurés.'));
+    } else if (!s) {
+      const e = inp('Email admin', 'email', L('p2f_cloud_email')), p = inp('Mot de passe', 'password');
+      b.append(e, p, btn('Se connecter', 'gold', () => run(async () => { await login(e.value.trim(), p.value); L('p2f_cloud_email', e.value.trim()); renderAdmin(); return 1; }, () => 'Connecté.')), btn('Changer de projet Supabase', '', () => { L('p2f_cloud_url', null); L('p2f_cloud_key', null); renderAdmin(); }));
+    } else {
+      b.append(mk('div', 'hint', 'Connecté : ' + s.email + (L('p2f_cloud_last') ? ' · dernière synchro : ' + new Date(+L('p2f_cloud_last')).toLocaleString('fr-FR') : '')));
+      b.append(btn('☁️ Sauvegarder maintenant', 'gold', () => run(backup, r => 'Sauvegarde terminée (' + r.n + ' fichier(s) envoyé(s)' + (r.skip ? ', ' + r.skip + ' illisible(s)' : '') + ').')), btn('⬇️ Restaurer sur ce téléphone', '', () => { if (confirm('Récupérer le cloud sur ce téléphone ? Rien n’est supprimé ici : les projets et fichiers manquants sont ajoutés.')) run(restore, r => 'Restauré : ' + r.got + ' fichier(s) ajouté(s)' + (r.fail ? ', ' + r.fail + ' non gardé(s) (stockage plein ?)' : '') + '.'); }));
+      const l = mk('label', 'hint'); const ck = mk('input'); ck.type = 'checkbox'; ck.checked = L('p2f_cloud_auto') === '1'; ck.onchange = () => { L('p2f_cloud_auto', ck.checked ? '1' : '0'); if (ck.checked) sched(); }; l.append(ck, ' Synchronisation automatique (sauvegarde après chaque modification, récupération à l’ouverture)'); b.append(l, btn('Se déconnecter', 'red', () => { L(SK, null); renderAdmin(); }));
+    }
+    b.append(msg, mk('div', 'hint', 'Non inclus : les vidéos déjà exportées (« Mes vidéos »), trop lourdes. Pense à les télécharger.')); box.append(b);
+  }
+  const nav = document.querySelector('#tabs button[data-tab="admin"]'); if (nav) nav.addEventListener('click', renderAdmin);
+  setTimeout(() => { if (L('p2f_cloud_auto') === '1' && J(L(SK)) && cfg().url) restore(true).then(r => { if (r) toast('Synchronisé depuis le cloud.'); }).catch(() => {}); }, 3500);
+})();
+</script>
+<script>
 /* Colle ici tes assets d'origine si tu les as (sinon un logo de secours est généré) :
    window.P2F_ASSETS = { logo: 'data:image/webp;base64,…', fb: 'data:font/woff2;base64,…', fbi: 'data:font/woff2;base64,…' }; */
 window.P2F_ASSETS = window.P2F_ASSETS || {};
+/* ADMIN : colle ici l'adresse de ton projet Supabase et sa clé « anon / publishable » (clé publique, pas la clé secrète) : */
+window.P2F_CLOUD = window.P2F_CLOUD || { url: '', key: '' };
 </script>
 </body>
 </html>
