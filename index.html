@@ -3657,10 +3657,15 @@ window.startStudio = startStudio;
     load_template(a) { const t = TEMPLATES.find(x => x[0] === a.key); if (!t) throw new Error('modèle inconnu'); const p = t[3](); P.scenes = p.scenes; P.music = p.music; P.name = p.name; },
     edit_scene(a) { const s = sceneAt(a.index); if (a.name) s.name = String(a.name).slice(0, 40); if (a.dur != null) s.dur = num(a.dur, 1, 30, s.dur); if (TR.includes(a.trans)) s.trans = a.trans; if (BGP[a.bg]) Object.assign(s.bg, DEFBG, BGP[a.bg]); if (a.impact != null) s.impact = !!a.impact; },
     delete_scene(a) { if (P.scenes.length < 2) throw new Error('il faut garder une scène'); P.scenes.splice(num(a.index, 0, P.scenes.length - 1, 0), 1); },
+    move_scene(a) { const i = num(a.from, 0, P.scenes.length - 1, 0), j = num(a.to, 0, P.scenes.length - 1, 0), x = P.scenes.splice(i, 1)[0]; P.scenes.splice(j, 0, x); },
+    swap_scenes(a) { const i = num(a.a, 0, P.scenes.length - 1, 0), j = num(a.b, 0, P.scenes.length - 1, 0), t = P.scenes[i]; P.scenes[i] = P.scenes[j]; P.scenes[j] = t; },
+    duplicate_scene(a) { const i = num(a.index, 0, P.scenes.length - 1, 0), c = P.scenes[i], { id: _a, ...r } = JSON.parse(JSON.stringify(c)); P.scenes.splice(i + 1, 0, newScene(Object.assign(r, { elements: c.elements.map(e => { const { id: _b, ...q } = JSON.parse(JSON.stringify(e)); return newEl(e.type, q); }) }))); },
+    replace_text(a) { const f = String(a.from || '').toLowerCase(), t = String(a.to || '').slice(0, 120); if (!f) throw new Error('texte vide'); let k = 0; P.scenes.forEach((s, i) => { if (a.scene != null && i !== a.scene) return; s.elements.forEach(e => { if (e.text && e.text.toLowerCase().includes(f)) { e.text = t; k++; } }); }); if (!k) throw new Error('texte « ' + a.from + ' » introuvable'); },
+    set_title(a) { const s = sceneAt(a.scene), e = s.elements.find(x => x.type === 'banner') || s.elements.find(x => x.type === 'text'); if (e) e.text = String(a.text).slice(0, 120); else s.elements.push(mkEl({ type: 'banner', text: a.text, style: 'gold', y: 800 })); },
     add_scene(a) { P.scenes.splice(num(a.position, 0, P.scenes.length, P.scenes.length), 0, mkScene(a)); },
     set_element(a) { const s = sceneAt(a.scene); if (a.remove) { s.elements.splice(num(a.index, 0, s.elements.length - 1, 0), 1); return; } const p = a.props || {}; const e = s.elements[a.index]; if (!e) { s.elements.push(mkEl(p)); return; }
       if (p.text != null) e.text = String(p.text).slice(0, 120); ['size', 'y', 't0'].forEach(k => { if (p[k] != null) e[k] = num(p[k], 0, 2000, e[k]); }); if (ANIM_OPTS.some(x => x[0] === p.anim)) e.anim = p.anim; if (STY[p.style]) e.style = p.style; if (p.media_id && rec(p.media_id)) { e.mid = p.media_id; need.add(p.media_id); } },
-    set_music(a) { const M = P.music; if (a.mode === 'none') { M.mode = 'none'; return; } if (a.file_id) { const f = rec(a.file_id); if (!f || f.kind !== 'audio') throw new Error('musique introuvable'); need.add(f.id); M.fileId = f.id; M.mode = 'perso'; } if (a.mode === 'auto') M.mode = 'auto';
+    set_music(a) { const M = P.music; if (a.vol != null) M.vol = num(a.vol, 0, 1, M.vol == null ? .9 : M.vol); if (a.mode === 'none') { M.mode = 'none'; return; } if (a.file_id) { const f = rec(a.file_id); if (!f || f.kind !== 'audio') throw new Error('musique introuvable'); need.add(f.id); M.fileId = f.id; M.mode = 'perso'; } if (a.mode === 'auto') M.mode = 'auto';
       [['vol', 'mvol', 0, 1], ['start', 'start', 0, 600], ['end', 'end', 0, 600], ['fade_in', 'fadeIn', 0, 30], ['fade_out', 'fadeOut', 0, 30], ['offset', 'offset', 0, 120]].forEach(([k, d, mn, mx]) => { if (a[k] != null) M[d] = num(a[k], mn, mx, 0); }); },
     scale_duration(a) { const tot = P.scenes.reduce((x, s) => x + s.dur, 0), k = num(a.total_seconds, 5, 180, tot) / tot; P.scenes.forEach(s => { s.dur = +Math.max(1, s.dur * k).toFixed(2); s.elements.forEach(e => { e.t0 = +(e.t0 * k).toFixed(2); if (e.t1 != null) e.t1 = +(e.t1 * k).toFixed(2); }); }); }
   };
@@ -3671,41 +3676,90 @@ window.startStudio = startStudio;
   const AS = new Set(); let AC = []; let log, prog, ta, selM, selT, epI;
   const say = (who, txt) => { const d = mk('div', 'hint'); d.style.cssText = 'padding:8px 10px;border-radius:10px;background:' + (who === 'me' ? '#142252' : '#0c1428') + ';border:1px solid var(--line);white-space:pre-wrap'; d.textContent = (who === 'me' ? 'Moi : ' : 'IA : ') + txt; log.append(d); log.scrollTop = log.scrollHeight; };
   const summary = () => ({ name: P.name, music: P.music, scenes: P.scenes.map((s, i) => ({ index: i, name: s.name, dur: s.dur, trans: s.trans, elements: s.elements.map((e, j) => ({ i: j, type: e.type, text: e.text, anim: e.anim, y: e.y, t0: e.t0, media: e.mid })) })) });
-  const endpoint = () => (window.P2F_AI_ENDPOINT || localStorage.getItem('p2f_ai_endpoint') || '/api/assistant');
-  const hasEP = () => !!(window.P2F_AI_ENDPOINT || localStorage.getItem('p2f_ai_endpoint'));
+  const endpoint = () => (explicitEP() || cloudEP() || '/api/assistant');
+  const explicitEP = () => window.P2F_AI_ENDPOINT || localStorage.getItem('p2f_ai_endpoint') || '';
+  const cloudEP = () => { try { const c = window.p2fCloudCfg && window.p2fCloudCfg(); return c && c.url && c.key && localStorage.getItem('p2f_cloud_session') ? c.url + '/functions/v1/assistant' : ''; } catch (e) { return ''; } };
+  const hasEP = () => !!(explicitEP() || cloudEP());
+  const aiHeaders = async () => { const h = { 'Content-Type': 'application/json' }; if (!explicitEP() && cloudEP() && window.p2fCloudToken) { const t = await window.p2fCloudToken(); if (t) { h.Authorization = 'Bearer ' + t; h.apikey = window.p2fCloudCfg().key; } } return h; };
   const KW = { pubprod: ['produit'], promo: ['promo', 'reduction', 'solde'], marque: ['marque'], cine: ['cinema', 'cinematique'], story: ['storytelling', 'histoire'], avap: ['avant'], temoin: ['temoignage'], resto: ['restaurant', 'menu', 'plat'], event: ['evenement', 'soiree', 'ouverture'], social: ['tiktok', 'reels', 'shorts', 'reseaux'], unbox: ['unboxing', 'deballage'], tuto: ['tuto', 'etape'], presentation: ['boutique', 'commerce'], certif: ['certif'], flyer: ['flyer', 'affiche'], annonce: ['application'] };
   function localBot(txt) {
-    const t = txt.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, ''), calls = [], R = [], has = re => re.test(t), n = P.scenes.length, C = (name, args) => calls.push({ name, args });
-    const secs = (t.match(/(\d+)\s*(?:s\b|sec)/) || [])[1], tot = P.scenes.reduce((x, s) => x + s.dur, 0);
-    const key = selT.value || Object.keys(KW).find(k => KW[k].some(w => t.includes(w)));
-    const ids = FILES.filter(f => (f.kind === 'image' || f.kind === 'video') && f.id !== 'logo' && (!AS.size || AS.has(f.id)));
-    const hard = has(/supprim|raccourci|remplace|agrandi|plus gros|rends|rend |mets|ajoute|sans musique|fondu|appel a l.action|version plus|plus pro|plus dynamique|plus de transitions/);
-    const edit = hard || (!has(/fais|cree|genere|realise|monte/) && has(/dynamique|\bpro\b|professionnel|transition|logo|musique/));
-    const each = fn => P.scenes.forEach((s, i) => fn(s, i));
-    if (edit) {
-      if (has(/dynamique/)) { each((s, i) => { C('edit_scene', { index: i, trans: 'whip', impact: true }); s.elements.forEach((e, j) => C('set_element', { scene: i, index: j, props: { anim: 'impactzoom' } })); }); R.push('Plus dynamique : transitions rapides, impacts et zooms.'); }
-      if (has(/professionnel|\bpro\b/)) { each((s, i) => { C('edit_scene', { index: i, trans: i % 2 ? 'fade' : 'dip', bg: 'luxe' }); s.elements.forEach((e, j) => { if (e.type === 'banner') C('set_element', { scene: i, index: j, props: { style: 'silver' } }); }); }); R.push('Version plus professionnelle : fondus, fond luxe, bandeaux argentés.'); }
-      else if (has(/transition/)) { const tr = ['whip', 'zoom', 'wipe', 'slide', 'dip']; each((s, i) => C('edit_scene', { index: i, trans: tr[i % 5] })); R.push('Transitions variées sur toutes les scènes.'); }
-      if (has(/agrandi|plus gros/)) { each((s, i) => s.elements.forEach((e, j) => { if (e.type !== 'image') C('set_element', { scene: i, index: j, props: { size: Math.min(400, Math.round((e.size || 100) * 1.25)) } }); })); R.push('Textes agrandis de 25 %.'); }
-      if (has(/logo/)) { const end = has(/fin|termine|conclu/); C('add_scene', { position: end ? n : 0, name: 'Logo', dur: 3, impact: true, bg: 'noir', elements: [{ type: 'image', media_id: 'logo', y: 800 }] }); R.push('Scène logo ajoutée ' + (end ? 'à la fin.' : 'au début.')); }
-      if (has(/appel a l.action/)) { C('add_scene', { position: n, name: 'Appel', dur: 3, impact: true, bg: 'commerce', elements: [{ type: 'banner', text: 'COMMANDE MAINTENANT', style: 'gold', y: 800 }, { type: 'text', text: 'Adresse du site', y: 1100, t0: .8 }] }); R.push('Appel à l’action ajouté en dernière scène : remplace « Adresse du site ».'); }
-      if (has(/sans musique/)) { C('set_music', { mode: 'none' }); R.push('Musique retirée.'); }
-      else if (has(/musique|fondu/)) { if (selM.value) { C('set_music', { file_id: selM.value, fade_in: has(/fondu/) ? 2 : undefined, fade_out: has(/fondu/) ? 2 : undefined }); R.push('Musique remplacée.'); } else if (P.music.mode === 'perso' && has(/fondu/)) { C('set_music', { fade_in: 2, fade_out: 2 }); R.push('Fondus de 2 s ajoutés.'); } else R.push('Choisis d’abord une musique dans la liste « Musique », puis redis-le.'); }
-      if (secs || has(/raccourci/)) { C('scale_duration', { total_seconds: secs ? +secs : Math.round(tot * .75) }); R.push('Durée totale ajustée.'); }
-      const del = t.match(/supprim\w*\D*(\d+)/); if (del && +del[1] <= n && n > 1) { C('delete_scene', { index: +del[1] - 1 }); R.push('Scène ' + del[1] + ' supprimée.'); }
-    } else if (key) {
-      C('load_template', { key }); let k = 0; TEMPLATES.find(x => x[0] === key)[3]().scenes.forEach((s, j) => s.elements.forEach((e, l) => { if (e.type === 'image' && ids[k]) C('set_element', { scene: j, index: l, props: { media_id: ids[k++].id } }); }));
-      if (secs) C('scale_duration', { total_seconds: +secs }); R.push('Modèle « ' + TEMPLATES.find(x => x[0] === key)[1] + ' » chargé' + (k ? ' avec ' + k + ' média(s)' : '') + '. Remplace les textes « 00 € » et « Adresse du site » par les tiens.');
-    } else if (ids.length) {
-      const q = (txt.match(/[«"“]([^»"”]+)[»"”]/) || [])[1], sub = (q || (txt.match(/pour\s+([^,.]{3,40})/i) || [])[1] || 'MA VIDÉO').toUpperCase(), tr = ['whip', 'zoom', 'wipe', 'slide'];
-      const sc = [{ name: 'Intro', dur: 3, impact: true, bg: 'commerce', elements: [{ type: 'banner', text: sub, style: 'gold', y: 800, anim: 'impactzoom' }] }];
-      ids.slice(0, 8).forEach((f, i) => sc.push({ name: 'Média ' + (i + 1), dur: 3.5, bg: i % 2 ? 'degrade' : 'noir', trans: tr[i % 4], elements: [{ type: 'image', media_id: f.id, y: 900 }] }));
-      sc.push({ name: 'Fin', dur: 3.5, impact: true, bg: 'commerce', elements: [{ type: 'image', media_id: 'logo', y: 700 }, { type: 'banner', text: 'Adresse du site', style: 'gold', y: 1300, t0: .8 }] });
-      C('build_project', { name: sub.slice(0, 40), scenes: sc }); if (secs) C('scale_duration', { total_seconds: +secs });
-      R.push('Montage créé avec ' + Math.min(8, ids.length) + ' média(s) : intro, tes médias, puis logo et adresse. Remplace « Adresse du site » par ton vrai texte.');
-    } else R.push('Je ne crée rien sans tes médias : importe des photos ou vidéos dans Fichiers (ou coche-les dans 📎), choisis un modèle ou décris ta vidéo.');
-    if (!edit && calls.length && selM.value) { C('set_music', { file_id: selM.value }); R.push('Ta musique choisie est intégrée.'); }
-    if (!calls.length && !R.length) R.push('Je comprends : « plus dynamique », « plus professionnel », « plus de transitions », « agrandis les textes », « supprime la 3ème scène », « logo au début », « termine avec un appel à l’action », « raccourcis à 15 secondes », « sans musique », ou le nom d’un modèle (restaurant, promo, tiktok…).');
+    const N = x => x.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '');
+    const qs = [], raw = txt.replace(/[«"“]([^»"”]{1,100})[»"”]/g, (m, q) => { qs.push(q.trim()); return ' §' + (qs.length - 1) + '§ '; });
+    const calls = [], R = [], bad = [], dels = []; let n = P.scenes.length, cr = null;
+    const cur = typeof curScene === 'number' ? Math.max(0, Math.min(curScene, n - 1)) : 0, C = (name, args) => calls.push({ name, args });
+    const ORD = { premiere: 1, deuxieme: 2, troisieme: 3, quatrieme: 4, cinquieme: 5, sixieme: 6 };
+    const idxOf = t => { let m = t.match(/scene\s*(?:n\W*)?(\d+)/) || t.match(/(\d+)\s*(?:e|eme|ere|er)?\s*scene/); if (m) return +m[1] - 1; m = t.match(/(premiere|deuxieme|troisieme|quatrieme|cinquieme|sixieme)\s+scene/); if (m) return ORD[m[1]] - 1; return /derniere scene|scene finale/.test(t) ? n - 1 : null; };
+    const BG = [[/noir|sombre/, 'noir'], [/luxe|dore|\bor\b/, 'luxe'], [/espace|bleu|nuit/, 'espace'], [/futur|neon/, 'futur'], [/degrade|rouge/, 'degrade'], [/commerce|vert/, 'commerce'], [/minimal|simple|blanc|clair/, 'mini']];
+    const ST = [[/dore|\bor\b|jaune/, 'gold'], [/argent|gris/, 'silver'], [/noir/, 'black'], [/neon|vert/, 'neon'], [/bleu/, 'blue'], [/rouge/, 'red'], [/blanc/, 'white'], [/verre|transparent/, 'glass']];
+    const TRN = [[/fondu|fade/, 'fade'], [/zoom/, 'zoom'], [/balay|wipe|volet/, 'wipe'], [/glisse|slide/, 'slide'], [/rapide|whip|flash/, 'whip'], [/coupe|cut/, 'cut'], [/noir|dip/, 'dip']];
+    const ANM = [[/rebond|bounce/, 'bounce'], [/flou|blur/, 'blur'], [/tourn|rotation|spin/, 'spin'], [/impact|explos/, 'impactzoom'], [/zoom/, 'zoom'], [/apparition|pop/, 'pop']];
+    const pick = (t, tab) => (tab.find(([r]) => r.test(t)) || [])[1];
+    const secOf = t => { const m = t.match(/(\d+)\s*(?:s\b|sec|seconde)/); return m ? +m[1] : null; };
+    const tot = () => P.scenes.reduce((x, s) => x + s.dur, 0);
+    const HELP = 'Je comprends des phrases comme : « remplace "A" par "B" », « mets le fond noir », « la scène 2 dure 5 secondes », « duplique la scène 3 », « mets la 3ème scène en premier », « supprime la 2ème scène », « ajoute une scène avec "MERCI" », « plus dynamique », « plus professionnel », « transitions zoom », « agrandis les textes », « bandeaux en rouge », « logo au début », « appel à l’action à la fin », « baisse la musique », « raccourcis à 15 secondes », ou « fais une vidéo de 20 secondes pour "MON TITRE" » avec tes médias. Tu peux en enchaîner plusieurs dans un même message.';
+    const clauses = N(raw).split(/\s*(?:;|\.\s|\bpuis\b|\bensuite\b|\bet aussi\b|,\s|\bet\b(?=\s+(?:mets?|supprim\w*|ajout\w*|rajout\w*|remplac\w*|chang\w*|rend\w*|agrandi\w*|baisse|mont\w*|coupe|raccourci\w*|allonge|rallonge|deplace|dupli\w*|retire|enleve|termin\w*|commenc\w*|utilis\w*|choisi\w*|fais|passe|inverse|echange)))\s*/).filter(x => x && x.trim());
+    for (const t of clauses) {
+      const q = [...t.matchAll(/§(\d+)§/g)].map(m => qs[+m[1]]); let hit = 0; const H = m => { hit = 1; R.push(m); };
+      if (/\b(fais|cree|creer|genere|realise|monte|montage)\b/.test(t) && /video|clip|montage|pub\b|presentation/.test(t) || /modele|template/.test(t)) { cr = { q: q[0], secs: secOf(t), key: Object.keys(KW).find(k => KW[k].some(w => t.includes(w))), dyn: /dynamique/.test(t), pro: /professionnel|\bpro\b/.test(t) }; continue; }
+      const sc = idxOf(t); if (sc != null && (sc < 0 || sc >= n)) { R.push('⚠ La scène ' + (sc + 1) + ' n’existe pas (il y en a ' + n + ').'); continue; }
+      const tg = sc == null ? P.scenes.map((x, i) => i) : [sc], who = sc == null ? 'toutes les scènes' : 'la scène ' + (sc + 1), num = secOf(t);
+      if (/annule|retour arriere|reviens en arriere/.test(t)) H('Pour annuler, appuie sur « ↶ Annuler la dernière modification IA ».');
+      if (/^(bonjour|salut|coucou|hello|aide|help)\b|que sais.tu|tu sais faire/.test(t)) H(HELP);
+      if (/ajout|rajout|insere|nouvelle/.test(t) && /scene/.test(t)) { C('add_scene', { position: sc == null ? n : sc + 1, name: 'Nouvelle scène', dur: num || 3, bg: pick(t, BG) || 'commerce', elements: q[0] ? [{ type: 'banner', text: q[0], style: 'gold', y: 800 }] : [] }); n++; H('Scène ajoutée' + (q[0] ? ' avec « ' + q[0] + ' »' : '') + '.'); }
+      else if (/ajout|rajout|insere/.test(t) && /texte|titre|bandeau|mot/.test(t) && q[0]) { const s0 = sc == null ? cur : sc; C('set_element', { scene: s0, props: { type: /bandeau|titre/.test(t) ? 'banner' : 'text', text: q[0], style: 'gold', y: 1100, t0: .5 } }); H('Texte « ' + q[0] + ' » ajouté à la scène ' + (s0 + 1) + '.'); }
+      else if (/remplac|chang|modifi|transform/.test(t) && q.length >= 2) { C('replace_text', { from: q[0], to: q[1], scene: sc }); H('« ' + q[0] + ' » remplacé par « ' + q[1] + ' ».'); }
+      else if (q.length === 1 && /titre|bandeau|texte|ecri|mets?\b|chang|remplac|modifi/.test(t)) { const s0 = sc == null ? (/titre/.test(t) ? 0 : cur) : sc; C('set_title', { scene: s0, text: q[0] }); H('Texte de la scène ' + (s0 + 1) + ' : « ' + q[0] + ' ».'); }
+      if (/dupli|copie|clone/.test(t) && sc != null) { C('duplicate_scene', { index: sc }); n++; H('Scène ' + (sc + 1) + ' dupliquée.'); }
+      const two = t.match(/(\d+)\D{1,25}(?:et|avec)\D{0,12}(\d+)/);
+      if (/inverse|echange|permute/.test(t) && two) { C('swap_scenes', { a: +two[1] - 1, b: +two[2] - 1 }); H('Scènes ' + two[1] + ' et ' + two[2] + ' échangées.'); }
+      else if (/deplace|passe|mets?\b|place/.test(t) && /en premier|au debut|a la fin|en dernier/.test(t) && sc != null) { const e = /a la fin|en dernier/.test(t) && !/en premier|au debut/.test(t); C('move_scene', { from: sc, to: e ? n - 1 : 0 }); H('Scène ' + (sc + 1) + ' déplacée ' + (e ? 'à la fin.' : 'au début.')); }
+      if (/supprim|enleve|retire|efface|vire/.test(t) && sc != null && !/musique|logo|texte|titre|bandeau/.test(t)) { if (n > 1) { dels.push(sc); H('Scène ' + (sc + 1) + ' supprimée.'); } else H('⚠ Je garde au moins une scène.'); }
+      if (num && /dure|duree|passe|fais|total|video|raccourci|allonge|rallonge|ramene/.test(t) && !/musique|fondu/.test(t)) { if (sc != null) { C('edit_scene', { index: sc, dur: num }); H('La scène ' + (sc + 1) + ' dure ' + num + ' s.'); } else { C('scale_duration', { total_seconds: num }); H('Durée totale : ' + num + ' s.'); } }
+      else if (/raccourci|plus court|moins long/.test(t)) { C('scale_duration', { total_seconds: Math.round(tot() * .75) }); H('Vidéo raccourcie d’un quart.'); }
+      else if (/allonge|rallonge|plus long/.test(t)) { C('scale_duration', { total_seconds: Math.round(tot() * 1.3) }); H('Vidéo allongée de 30 %.'); }
+      const bgk = /fond|arriere.plan|decor|ambiance/.test(t) ? pick(t, BG) : null;
+      if (bgk) { tg.forEach(i => C('edit_scene', { index: i, bg: bgk })); H('Fond « ' + bgk + ' » sur ' + who + '.'); }
+      if (/transition|passage|enchainement/.test(t)) { const k = pick(t, TRN); if (k) { tg.forEach(i => C('edit_scene', { index: i, trans: k })); H('Transition « ' + k + ' » sur ' + who + '.'); } else { const cy = ['whip', 'zoom', 'wipe', 'slide', 'dip']; tg.forEach((i, j) => C('edit_scene', { index: i, trans: cy[j % 5] })); H('Transitions variées sur ' + who + '.'); } }
+      if (/dynamique|energique|plus de rythme/.test(t)) { tg.forEach(i => { C('edit_scene', { index: i, trans: 'whip', impact: true }); P.scenes[i].elements.forEach((e, j) => C('set_element', { scene: i, index: j, props: { anim: 'impactzoom' } })); }); H('Plus dynamique sur ' + who + '.'); }
+      if (/professionnel|\bpro\b|sobre|elegant|serieux/.test(t)) { tg.forEach((i, j) => { C('edit_scene', { index: i, trans: j % 2 ? 'fade' : 'dip', bg: 'luxe' }); P.scenes[i].elements.forEach((e, k) => { if (e.type === 'banner') C('set_element', { scene: i, index: k, props: { style: 'silver' } }); }); }); H('Version plus professionnelle sur ' + who + ' : fondus, fond luxe, bandeaux argentés.'); }
+      if (/effet|animation|anime|zoom|rebond|flou/.test(t) && !/transition|dynamique|fondu|dure/.test(t) && !bgk) { const k = pick(t, ANM) || 'pop'; tg.forEach(i => P.scenes[i].elements.forEach((e, j) => C('set_element', { scene: i, index: j, props: { anim: k } }))); H('Animation « ' + k + ' » sur ' + who + '.'); }
+      const up = /agrandi|plus gros|grossi|plus grand/.test(t), dn = !num && /reduis|diminue|plus petit|retreci/.test(t);
+      if (up || dn) { tg.forEach(i => P.scenes[i].elements.forEach((e, j) => { if (e.type !== 'image') C('set_element', { scene: i, index: j, props: { size: Math.max(30, Math.min(400, Math.round((e.size || 100) * (up ? 1.25 : .8)))) } }); })); H('Textes ' + (up ? 'agrandis' : 'réduits') + ' sur ' + who + '.'); }
+      const stk = !/fond|arriere/.test(t) && /bandeau|titre|texte/.test(t) && !q.length ? pick(t, ST) : null;
+      if (stk && /\ben\b|mets?\b|chang|couleur|passe/.test(t)) { tg.forEach(i => P.scenes[i].elements.forEach((e, j) => { if (e.type === 'banner') C('set_element', { scene: i, index: j, props: { style: stk } }); })); H('Bandeaux en « ' + stk + ' » sur ' + who + '.'); }
+      if (/logo/.test(t) && /mets?\b|ajout|rajout|affiche|termin|commenc|insere|place|fini/.test(t)) { const e = /fin|termin|conclu|dernier|fini/.test(t); C('add_scene', { position: e ? n : 0, name: 'Logo', dur: 3, impact: true, bg: 'noir', elements: [{ type: 'image', media_id: 'logo', y: 800 }] }); n++; H('Logo ajouté ' + (e ? 'à la fin.' : 'au début.')); }
+      if (/appel a l.action|call to action|acheter|commander/.test(t) && /ajout|termin|fini|mets?\b|conclu/.test(t)) { C('add_scene', { position: n, name: 'Appel', dur: 3, impact: true, bg: 'commerce', elements: [{ type: 'banner', text: 'COMMANDE MAINTENANT', style: 'gold', y: 800 }, { type: 'text', text: 'Adresse du site', y: 1100, t0: .8 }] }); n++; H('Appel à l’action ajouté en dernière scène : remplace « Adresse du site ».'); }
+      if (/musique|volume|morceau|chanson/.test(t)) {
+        const M = P.music, mv = (M.mode === 'perso' ? M.mvol : M.vol), v = mv == null ? .9 : mv, aud = FILES.filter(f => f.kind === 'audio'), ws = t.split(/\W+/).filter(w => w.length > 3 && !/musique|morceau|chanson|mets|remplace|utilise|choisis|avec|volume|fond/.test(w));
+        const f = aud.find(x => ws.some(w => N(x.name || '').includes(w))) || (selM.value && aud.find(x => x.id === selM.value));
+        if (/sans musique|coupe|enleve|retire|supprim|desactive|plus de musique/.test(t)) { C('set_music', { mode: 'none' }); H('Musique retirée.'); }
+        else if (/baisse|moins fort|diminue|plus doux|discret/.test(t)) { C('set_music', { vol: Math.max(.1, v - .25) }); H('Musique plus basse.'); }
+        else if (/monte|plus fort|augmente|plus present/.test(t)) { C('set_music', { vol: Math.min(1, v + .2) }); H('Musique plus forte.'); }
+        else if (/fondu|fade/.test(t)) { C('set_music', { fade_in: 2, fade_out: 2 }); H('Fondus de 2 s sur la musique.'); }
+        else if (f) { C('set_music', { file_id: f.id }); H('Musique « ' + f.name + ' » intégrée.'); }
+        else if (/auto/.test(t)) { C('set_music', { mode: 'auto' }); H('Musique automatique.'); }
+        else H('Je n’ai pas trouvé cette musique : importe-la dans Fichiers, puis cite son nom ou choisis-la dans la liste « Musique ».');
+      }
+      if (!hit && t.trim().length > 2) bad.push(t.replace(/§(\d+)§/g, (m, k) => '« ' + qs[+k] + ' »').trim());
+    }
+    dels.filter((v, i, a) => a.indexOf(v) === i).sort((a, b) => b - a).forEach(i => C('delete_scene', { index: i }));
+    if (cr && !calls.length) {
+      const ids = FILES.filter(f => (f.kind === 'image' || f.kind === 'video') && f.id !== 'logo' && (!AS.size || AS.has(f.id))), key = selT.value || cr.key;
+      if (key && TEMPLATES.find(x => x[0] === key)) {
+        C('load_template', { key }); let k = 0; TEMPLATES.find(x => x[0] === key)[3]().scenes.forEach((s, j) => s.elements.forEach((e, l) => { if (e.type === 'image' && ids[k]) C('set_element', { scene: j, index: l, props: { media_id: ids[k++].id } }); }));
+        if (cr.secs) C('scale_duration', { total_seconds: cr.secs }); R.push('Modèle « ' + TEMPLATES.find(x => x[0] === key)[1] + ' » chargé' + (k ? ' avec ' + k + ' média(s)' : '') + '. Remplace les textes « 00 € » et « Adresse du site » par les tiens.');
+      } else if (ids.length) {
+        const sub = (cr.q || 'MA VIDÉO').toUpperCase(), tr = ['whip', 'zoom', 'wipe', 'slide'], bg = cr.pro ? 'luxe' : 'commerce', st = cr.pro ? 'silver' : 'gold';
+        const sc = [{ name: 'Intro', dur: 3, impact: true, bg, trans: cr.pro ? 'dip' : 'whip', elements: [{ type: 'banner', text: sub, style: st, y: 800, anim: cr.dyn ? 'impactzoom' : 'pop' }] }];
+        ids.slice(0, 8).forEach((f, i) => sc.push({ name: 'Média ' + (i + 1), dur: 3.5, bg: i % 2 ? 'degrade' : 'noir', trans: cr.pro ? (i % 2 ? 'fade' : 'dip') : cr.dyn ? 'whip' : tr[i % 4], impact: !!cr.dyn, elements: [{ type: 'image', media_id: f.id, y: 900 }] }));
+        sc.push({ name: 'Fin', dur: 3.5, impact: true, bg, elements: [{ type: 'image', media_id: 'logo', y: 700 }, { type: 'banner', text: 'Adresse du site', style: st, y: 1300, t0: .8 }] });
+        C('build_project', { name: sub.slice(0, 40), scenes: sc }); if (cr.secs) C('scale_duration', { total_seconds: cr.secs });
+        R.push('Montage créé avec ' + Math.min(8, ids.length) + ' média(s) : intro « ' + sub + ' », tes médias, puis logo et adresse. Remplace « Adresse du site » par ton vrai texte.');
+      } else R.push('Je ne crée rien sans tes médias : importe des photos ou vidéos dans Fichiers (ou coche-les dans 📎), puis redis-le. Mets ton titre entre guillemets.');
+      if (selM.value && calls.length) { C('set_music', { file_id: selM.value }); R.push('Ta musique choisie est intégrée.'); }
+    }
+    if (bad.length) R.push('❓ Je n’ai pas compris : ' + bad.join(' / ') + '.\n' + HELP);
+    if (!calls.length && !R.length) R.push(HELP);
     return { reply: R.join('\n'), calls };
   }
   async function send() {
@@ -3714,7 +3768,8 @@ window.startStudio = startStudio;
     const media = FILES.filter(f => f.id !== 'logo' && (!AS.size || AS.has(f.id) || f.id === selM.value)).map(f => { const m = MEDIA.get(f.id), d = SNDB.get(f.id); return { id: f.id, name: f.name, kind: catOf(f), duration: d ? +d.duration.toFixed(1) : undefined, w: m && m.el && mW(m) || undefined, h: m && m.el && mH(m) || undefined }; });
     AIH.push(snap()); prog.style.display = 'block'; prog.removeAttribute('value');
     try {
-      const d = !hasEP() ? localBot(txt) : await (async () => { const r = await fetch(endpoint(), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ messages: AC, project: summary(), media, selectedMusic: selM.value || null, template: selT.value || null, templates: TEMPLATES.map(t => [t[0], t[1]]), styles: Object.keys(STY), presets: Object.keys(BGP), anims: ANIM_OPTS.map(a => a[0]), texts: Object.keys(TXS) }) });
+      const d = !hasEP() ? localBot(txt) : await (async () => { const r = await fetch(endpoint(), { method: 'POST', headers: await aiHeaders(), body: JSON.stringify({ messages: AC, project: summary(), media, selectedMusic: selM.value || null, template: selT.value || null, templates: TEMPLATES.map(t => [t[0], t[1]]), styles: Object.keys(STY), presets: Object.keys(BGP), anims: ANIM_OPTS.map(a => a[0]), texts: Object.keys(TXS) }) });
+      if (!r.ok && !explicitEP()) { const f = localBot(txt); if (!window.__fb) { window.__fb = 1; f.reply = '(IA en ligne non active : bot intégré utilisé.)\n' + f.reply; } return f; }
       if (!r.ok) throw new Error(r.status === 404 ? 'Serveur IA introuvable (voir LISEZ-MOI : adresse du serveur).' : 'Le serveur IA a répondu ' + r.status);
       return await r.json(); })(); let ok = 0;
       for (const c of d.calls || []) { try { if (!TOOLS[c.name]) throw new Error('outil inconnu'); TOOLS[c.name](c.args || {}); ok++; } catch (e) { say('ia', '⚠ ' + c.name + ' : ' + e.message); } }
@@ -3744,7 +3799,7 @@ window.startStudio = startStudio;
     epI = mk('input'); epI.placeholder = 'Adresse du serveur IA (ex. https://mon-site.vercel.app/api/assistant)'; epI.value = localStorage.getItem('p2f_ai_endpoint') || ''; epI.onchange = () => { try { localStorage.setItem('p2f_ai_endpoint', epI.value.trim()); } catch (e) {} };
     const ep = mk('details', 'grp'); ep.append(mk('summary', '', '⚙ Serveur IA'), epI);
     b.append(ta, det, selM, selT, go, prog, mk('div', 'chips'), un, ac, re, ep); box.append(b); fillIA();
-    say('ia', hasEP() ? 'Bonjour ! Dis-moi quelle vidéo tu veux (sujet, durée, ambiance, texte, musique) ou écris simplement tes instructions.' : 'Bonjour ! Mode GRATUIT intégré (sans clé ni serveur) : je comprends des ordres simples (« plus dynamique », « logo au début », « raccourcis à 15 secondes », nom d’un modèle…). Pour une vraie IA libre et gratuite, branche un serveur (⚙ en bas).');
+    say('ia', hasEP() ? 'Bonjour ! Dis-moi quelle vidéo tu veux (sujet, durée, ambiance, texte, musique) ou écris simplement tes instructions.' : 'Bonjour ! Mode GRATUIT intégré (sans clé ni serveur) : je comprends des ordres simples (« plus dynamique », « logo au début », « raccourcis à 15 secondes », nom d’un modèle…). Pour la vraie IA gratuite : connecte-toi dans 🔐 Admin (après installation de la fonction IA, voir LISEZ-MOI).');
   }
   const _ra = renderAll; renderAll = function () { _ra(); fillIA(); };
   const nav = document.querySelector('#tabs button[data-tab="ia"]'); if (nav) nav.onclick = () => { document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('on', x === nav)); document.querySelectorAll('section.tab').forEach(s => s.classList.toggle('on', s.id === 'tab-ia')); fillIA(); };
@@ -3774,6 +3829,7 @@ else window.addEventListener('load', startStudio);
   async function put(s, path, body, type) { const r = await fetch(cfg().url + '/storage/v1/object/studio/' + s.uid + '/' + path, { method: 'POST', headers: H(s, { 'x-upsert': 'true', 'Content-Type': type || 'application/octet-stream' }), body }); if (!r.ok) throw new Error('Envoi refusé (' + r.status + ') : ' + path); }
   async function get(s, path) { const r = await fetch(cfg().url + '/storage/v1/object/authenticated/studio/' + s.uid + '/' + path, { headers: H(s) }); if (r.status === 400 || r.status === 404) return null; if (!r.ok) throw new Error('Lecture refusée (' + r.status + ')'); return r; }
   async function list(s, prefix) { const r = await fetch(cfg().url + '/storage/v1/object/list/studio', { method: 'POST', headers: H(s, { 'Content-Type': 'application/json' }), body: JSON.stringify({ prefix: s.uid + '/' + prefix, limit: 1000 }) }); if (!r.ok) throw new Error('Liste refusée (' + r.status + ')'); return (await r.json()).map(x => x.name); }
+  window.p2fCloudCfg = cfg; window.p2fCloudToken = async () => { try { return (await token()).access; } catch (e) { return null; } };
   async function backup() {
     const s = await token(); say('Envoi des projets…'); const data = {}; KEYS.forEach(k => { const v = L(k); if (v) data[k] = v; }); data.at = Date.now();
     await put(s, 'data.json', JSON.stringify(data), 'application/json');
